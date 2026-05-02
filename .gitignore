@@ -1,0 +1,27 @@
+# Environment & secrets
+.env
+
+# Database (contains encrypted API keys and user data)
+*.db
+
+# Conversation history
+conversations/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ngrok / tunnel logs
+/tmp/
+*.log

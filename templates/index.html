@@ -1,0 +1,1598 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Debate Arena</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';</script>
+<script>
+tailwind.config = {
+  theme: { extend: { colors: {
+    surface: { 50:'#0f1729', 100:'#131b2e', 200:'#1a2540', 300:'#22304f' },
+    accent: { indigo:'#818cf8', teal:'#2dd4bf', amber:'#fbbf24' },
+  }}}
+}
+</script>
+<style>
+* { box-sizing: border-box; }
+body { background: #0a0e1a; }
+.katex-display { margin: 1em 0 !important; }
+.prose pre { background: #111827; border-radius: 8px; padding: 1em; overflow-x: auto; }
+.prose code { font-size: 0.9em; }
+.prose :not(pre) > code { background: rgba(255,255,255,0.08); padding: 0.15em 0.4em; border-radius: 4px; }
+
+@keyframes fadeSlideUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+@keyframes pulse-dot { 0%,100%{opacity:.3} 50%{opacity:1} }
+@keyframes spin { to{transform:rotate(360deg)} }
+
+.fade-slide-up { animation: fadeSlideUp 0.35s ease-out both; }
+.fade-in { animation: fadeIn 0.3s ease-out both; }
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+
+.cursor-blink::after { content:'|'; animation: blink 1s infinite; color: #818cf8; font-weight: 300; }
+.thinking-dot { animation: pulse-dot 1.2s infinite; display: inline-block; width: 5px; height: 5px; background: #818cf8; border-radius: 50%; margin: 0 2px; }
+.thinking-dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dot:nth-child(3) { animation-delay: 0.4s; }
+
+.thinking-block { background: rgba(99,102,241,0.06); border: 1px solid rgba(99,102,241,0.15); border-radius: 8px; margin-bottom: 12px; overflow: hidden; transition: all 0.3s ease; }
+.thinking-toggle { cursor: pointer; user-select: none; padding: 8px 12px; font-size: 0.75rem; color: #a5b4fc; display: flex; align-items: center; gap: 6px; transition: background 0.2s; }
+.thinking-toggle:hover { background: rgba(99,102,241,0.1); }
+.thinking-body { padding: 0 12px 10px; font-size: 0.8rem; color: #94a3b8; line-height: 1.6; white-space: pre-wrap; max-height: 300px; overflow-y: auto; transition: max-height 0.3s ease, padding 0.3s ease, opacity 0.3s ease; }
+.thinking-body.collapsed { max-height: 0; padding-top: 0; padding-bottom: 0; opacity: 0; overflow: hidden; }
+
+.glass { background: rgba(19, 27, 46, 0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.06); }
+.glass:hover { border-color: rgba(255,255,255,0.12); }
+.btn-primary { background: linear-gradient(135deg, #6366f1, #8b5cf6); transition: all 0.2s; }
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(99,102,241,0.3); }
+.btn-primary:active { transform: translateY(0); }
+.btn-ghost { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); transition: all 0.2s; }
+.btn-ghost:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.2); }
+.btn-danger { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); transition: all 0.2s; }
+.btn-danger:hover { background: rgba(239,68,68,0.2); border-color: rgba(239,68,68,0.4); }
+
+.msg-card { transition: all 0.3s ease; }
+.msg-card-a { border-left: 3px solid #818cf8; }
+.msg-card-b { border-left: 3px solid #2dd4bf; }
+.msg-card-c { border-left: 3px solid #f59e0b; }
+
+.progress-bar { height: 3px; border-radius: 2px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+.spinner { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.2); border-top-color: #818cf8; border-radius: 50%; animation: spin 0.8s linear infinite; display: inline-block; }
+
+.view-transition { transition: opacity 0.25s ease, transform 0.25s ease; }
+.view-hidden { opacity: 0; transform: translateY(8px); pointer-events: none; position: absolute; }
+.view-visible { opacity: 1; transform: translateY(0); pointer-events: auto; position: relative; }
+
+.drop-zone-active { border-color: #818cf8 !important; background: rgba(99,102,241,0.08) !important; }
+.file-chip { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.2); }
+
+.tl-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.15); background: #0a0e1a; cursor: pointer; transition: all 0.3s cubic-bezier(0.4,0,0.2,1); position: relative; z-index: 1; flex-shrink: 0; }
+.tl-dot:hover { transform: scale(1.6); border-color: rgba(255,255,255,0.4); box-shadow: 0 0 8px rgba(255,255,255,0.1); }
+.tl-dot-a { border-color: rgba(129,140,248,0.4); }
+.tl-dot-b { border-color: rgba(45,212,191,0.4); }
+.tl-dot-c { border-color: rgba(245,158,11,0.4); }
+.tl-dot-active { background: #818cf8; border-color: #818cf8; box-shadow: 0 0 16px rgba(129,140,248,0.6), 0 0 4px rgba(129,140,248,0.3); transform: scale(1.4); }
+.tl-dot-active-b { background: #2dd4bf; border-color: #2dd4bf; box-shadow: 0 0 16px rgba(45,212,191,0.6), 0 0 4px rgba(45,212,191,0.3); transform: scale(1.4); }
+.tl-dot-active-c { background: #f59e0b; border-color: #f59e0b; box-shadow: 0 0 16px rgba(245,158,11,0.6), 0 0 4px rgba(245,158,11,0.3); transform: scale(1.4); }
+.tl-dot-report { border-color: rgba(245,158,11,0.5); background: #0a0e1a; }
+.tl-label { font-size: 11px; color: #64748b; padding: 1px 0; cursor: pointer; transition: all 0.2s; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+.tl-label:hover { color: #e2e8f0; }
+.tl-model-name { font-size: 9px; color: #475569; max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes dotSlideIn { 0%{opacity:0;transform:scale(0) translateX(-12px)} 60%{transform:scale(1.2) translateX(0)} 100%{opacity:1;transform:scale(1) translateX(0)} }
+.tl-dot-enter { animation: dotSlideIn 0.4s ease-out both; }
+@keyframes lineGrow { from{transform:scaleY(0)} to{transform:scaleY(1)} }
+.tl-line-anim { animation: lineGrow 0.6s ease-out both; transform-origin: top; }
+
+.toast { position: fixed; bottom: 2rem; left: 50%; transform: translateX(-50%); background: rgba(34,48,79,0.95); border: 1px solid rgba(255,255,255,0.1); color: #e2e8f0; padding: 0.6rem 1.2rem; border-radius: 0.75rem; font-size: 0.8rem; z-index: 100; backdrop-filter: blur(8px); animation: fadeSlideUp 0.25s ease-out; pointer-events: none; }
+
+.health-dot { width: 6px; height: 6px; border-radius: 50%; display: inline-block; position: relative; }
+.health-dot::after { content: ''; position: absolute; inset: -2px; border-radius: 50%; opacity: 0.4; }
+.health-ok { background: #34d399; box-shadow: 0 0 4px #34d399; }
+.health-ok::after { border: 1px solid #34d399; animation: healthPulse 2s ease-in-out infinite; }
+.health-err { background: #f87171; box-shadow: 0 0 4px #f87171; }
+.health-err::after { border: 1px solid #f87171; animation: healthPulse 1.5s ease-in-out infinite; }
+.health-unk { background: #475569; }
+.health-unk::after { border: 1px solid #475569; }
+@keyframes healthPulse { 0%,100% { opacity: 0.15; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.4); } }
+
+.tab-active { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #a5b4fc; }
+.tab-inactive { background: transparent; border-color: transparent; color: #64748b; }
+.tab-inactive:hover { color: #94a3b8; background: rgba(255,255,255,0.03); }
+
+.mode-btn { transition: all 0.2s; cursor: pointer; }
+.mode-btn.active { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.5); color: #a5b4fc; }
+.mode-btn:not(.active) { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08); color: #64748b; }
+.mode-btn:not(.active):hover { color: #94a3b8; border-color: rgba(255,255,255,0.15); }
+
+.blind-round-label { font-size: 0.65rem; color: #475569; text-transform: uppercase; letter-spacing: 0.05em; padding: 0.25rem 0.5rem; background: rgba(255,255,255,0.03); border-radius: 4px; display: inline-block; margin-bottom: 0.5rem; }
+
+.topic-chip { cursor: pointer; transition: all 0.2s; }
+.topic-chip:hover { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.3); }
+
+.token-bar { height: 4px; border-radius: 2px; transition: width 0.5s ease; }
+.stat-number { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="text-gray-100 min-h-screen">
+
+<!-- Auth Gate -->
+<div id="auth-gate" class="fixed inset-0 bg-[#0a0e1a] flex items-center justify-center z-50">
+  <div class="glass rounded-2xl p-8 w-full max-w-sm shadow-2xl fade-slide-up">
+    <h1 class="text-2xl font-bold text-center mb-1 bg-gradient-to-r from-indigo-400 to-teal-400 bg-clip-text text-transparent">AI Debate Arena</h1>
+    <p class="text-gray-500 text-center text-sm mb-6">两个大模型的学术辩论场</p>
+    <div class="flex mb-6 bg-white/5 rounded-xl p-0.5">
+      <button id="tab-login" onclick="switchAuthTab('login')" class="flex-1 py-2 text-sm font-medium rounded-lg tab-active">登录</button>
+      <button id="tab-register" onclick="switchAuthTab('register')" class="flex-1 py-2 text-sm font-medium rounded-lg tab-inactive">注册</button>
+    </div>
+    <div id="form-login">
+      <input id="login-user" type="text" placeholder="用户名" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-3 transition">
+      <input id="login-pass" type="password" placeholder="密码" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-4 transition"
+        onkeydown="if(event.key==='Enter')doLogin()">
+      <button onclick="doLogin()" class="w-full py-3 btn-primary text-white font-semibold rounded-xl">登录</button>
+      <p id="login-error" class="text-red-400 text-sm mt-2 text-center hidden"></p>
+    </div>
+    <div id="form-register" class="hidden">
+      <input id="reg-user" type="text" placeholder="用户名 (至少2字符)" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-3 transition">
+      <input id="reg-pass" type="password" placeholder="密码 (至少4字符)" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-3 transition">
+      <input id="reg-pass2" type="password" placeholder="确认密码" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-4 transition"
+        onkeydown="if(event.key==='Enter')doRegister()">
+      <button onclick="doRegister()" class="w-full py-3 btn-primary text-white font-semibold rounded-xl">注册</button>
+      <p id="reg-error" class="text-red-400 text-sm mt-2 text-center hidden"></p>
+    </div>
+  </div>
+</div>
+
+<!-- Main App -->
+<div id="app" class="hidden">
+  <header class="sticky top-0 z-40 bg-[#0a0e1a]/80 backdrop-blur-xl border-b border-white/5">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <button id="back-btn" onclick="showLobby()" class="hidden text-gray-400 hover:text-white transition p-1 rounded-lg hover:bg-white/5" title="返回大厅">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <h1 class="text-lg font-bold bg-gradient-to-r from-indigo-400 to-teal-400 bg-clip-text text-transparent cursor-pointer" onclick="showLobby()">AI Debate Arena</h1>
+      </div>
+      <div class="flex items-center gap-3">
+        <div id="header-health" class="flex items-center gap-1.5 mr-2"></div>
+        <span id="status-badge" class="text-xs px-3 py-1.5 rounded-full bg-white/5 text-gray-400">就绪</span>
+        <button onclick="openStatsPanel()" class="btn-ghost px-3 py-1.5 text-xs text-gray-400 rounded-lg" title="统计面板">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        </button>
+        <button onclick="openModelManager()" class="btn-ghost px-3 py-1.5 text-xs text-gray-400 rounded-lg" title="管理模型">模型</button>
+        <div class="flex items-center gap-2 ml-1">
+          <span id="quota-badge" class="text-xs px-2 py-1 rounded-full bg-white/5 text-gray-500" title="本月共享模型配额"></span>
+          <a id="admin-link" class="hidden btn-ghost px-2 py-1 text-xs text-amber-400 rounded-lg" href="/api/admin/stats" target="_blank" title="管理员统计">管理</a>
+          <span id="username-display" class="text-xs text-gray-500"></span>
+          <button onclick="doLogout()" class="text-xs text-gray-600 hover:text-red-400 transition">退出</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Lobby View -->
+  <div id="lobby-view" class="view-transition view-visible">
+    <div class="max-w-6xl mx-auto px-4 pt-6 pb-8">
+      <div class="glass rounded-2xl p-6 mb-6 fade-slide-up">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="font-semibold text-white">新建辩论</h2>
+          <div class="flex items-center gap-2">
+            <div id="form-health" class="flex items-center gap-2"></div>
+            <button onclick="importConfig()" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded-lg" title="导入配置">导入</button>
+            <button onclick="exportConfig()" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded-lg" title="导出配置">导出</button>
+          </div>
+        </div>
+        <!-- Mode selector -->
+        <div class="flex gap-2 mb-4">
+          <div id="mode-sequential" class="mode-btn active flex-1 py-2.5 px-4 rounded-xl border text-sm text-center" onclick="setMode('sequential')">
+            <div class="font-medium">交替审查</div>
+            <div class="text-[10px] mt-0.5 opacity-70">A回答 → B审查 → A审查...</div>
+          </div>
+          <div id="mode-blind" class="mode-btn flex-1 py-2.5 px-4 rounded-xl border text-sm text-center" onclick="setMode('blind')">
+            <div class="font-medium">独立辩论</div>
+            <div class="text-[10px] mt-0.5 opacity-70">A和B同时作答，交换观点</div>
+          </div>
+          <div id="mode-chain3" class="mode-btn flex-1 py-2.5 px-4 rounded-xl border text-sm text-center" onclick="setMode('chain3')">
+            <div class="font-medium">三人辩论</div>
+            <div class="text-[10px] mt-0.5 opacity-70">A→B→C→A 链式轮流</div>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-3 mb-3">
+          <div class="flex-1 min-w-[140px]">
+            <label class="text-xs text-gray-500 mb-1 block">模型 A</label>
+            <select id="select-a" class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500/50 transition"></select>
+          </div>
+          <div class="flex items-end pb-3 text-gray-600 font-bold text-sm">VS</div>
+          <div class="flex-1 min-w-[140px]">
+            <label class="text-xs text-gray-500 mb-1 block">模型 B</label>
+            <select id="select-b" class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500/50 transition"></select>
+          </div>
+          <div id="model-c-wrapper" class="flex-1 min-w-[140px] hidden">
+            <label class="text-xs text-gray-500 mb-1 block">模型 C</label>
+            <select id="select-c" class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-500/50 transition"></select>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-4 mb-3">
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-500">最大轮数</label>
+            <input id="cfg-rounds" type="number" value="20" min="2" max="50" class="w-16 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs text-center focus:outline-none focus:border-indigo-500/50 transition">
+          </div>
+          <div class="flex items-center gap-2">
+            <label class="text-xs text-gray-500">分歧阈值</label>
+            <input id="cfg-threshold" type="number" value="5" min="1" max="20" class="w-16 px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs text-center focus:outline-none focus:border-indigo-500/50 transition">
+          </div>
+        </div>
+        <!-- Advanced toggles -->
+        <div class="border-t border-white/5 pt-3 mb-3">
+          <button onclick="toggleAdvanced()" class="text-xs text-gray-500 hover:text-gray-300 transition flex items-center gap-1">
+            <svg id="adv-arrow" class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+            高级选项
+          </button>
+          <div id="advanced-panel" class="hidden mt-3 space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-xs text-gray-400 flex items-center gap-1">记忆屏蔽 <span class="text-[10px] text-gray-600">(Memory Masking)</span></label>
+                <p class="text-[10px] text-gray-600 mt-0.5">每轮用LLM摘要筛选历史，防止错误传播</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input id="toggle-masking" type="checkbox" class="sr-only peer">
+                <div class="w-9 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+            <div id="masking-model-row" class="hidden pl-4">
+              <label class="text-[10px] text-gray-500 mb-1 block">屏蔽模型</label>
+              <select id="select-masking-model" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-xs focus:outline-none focus:border-indigo-500/50 transition"></select>
+            </div>
+            <div class="flex items-center justify-between">
+              <div>
+                <label class="text-xs text-gray-400 flex items-center gap-1">多样性保留 <span class="text-[10px] text-gray-600">(Diversity Retention)</span></label>
+                <p class="text-[10px] text-gray-600 mt-0.5">过滤与已有回复过于相似的新回复</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input id="toggle-diversity" type="checkbox" class="sr-only peer">
+                <div class="w-9 h-5 bg-white/10 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-gray-300 after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+            <div id="embedding-config" class="hidden pl-4 space-y-2">
+              <div class="text-[10px] text-gray-500">需要配置 Embedding API（OpenAI 兼容格式）</div>
+              <div class="flex gap-2">
+                <input id="emb-url" type="text" placeholder="Base URL" class="flex-1 px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-[11px] placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+                <input id="emb-model" type="text" placeholder="Model ID" class="w-32 px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-[11px] placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+              </div>
+              <input id="emb-key" type="password" placeholder="API Key" class="w-full px-2 py-1.5 bg-white/5 border border-white/10 rounded-lg text-white text-[11px] placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+            </div>
+          </div>
+        </div>
+        <!-- Topic library -->
+        <div class="mb-3">
+          <div class="flex items-center justify-between mb-1">
+            <label class="text-xs text-gray-500">讨论主题</label>
+            <button onclick="toggleTopicLib()" class="text-[10px] text-gray-500 hover:text-indigo-400 transition">题库</button>
+          </div>
+          <textarea id="topic-input" rows="2" placeholder="输入数学/物理/代码问题..."
+            class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 text-sm resize-none transition"></textarea>
+          <div id="topic-lib" class="hidden mt-2 flex flex-wrap gap-1.5"></div>
+        </div>
+        <div id="drop-zone" class="mb-3 border-2 border-dashed border-white/10 rounded-xl p-4 text-center transition-all duration-200 cursor-pointer hover:border-indigo-500/30 hover:bg-indigo-500/5">
+          <svg class="w-6 h-6 mx-auto mb-1.5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+          <p class="text-xs text-gray-600">拖拽文件到此处，或 <span class="text-indigo-400">点击上传</span></p>
+          <p class="text-[10px] text-gray-700 mt-1">支持 Markdown、代码文件、PDF</p>
+        </div>
+        <input type="file" id="file-input" accept=".md,.txt,.py,.rs,.js,.ts,.go,.java,.c,.cpp,.pdf,.swift,.kt,.rb,.php,.sh,.sql,.r,.lua,.hs,.ml,.zig,.nim,.dart,.vue,.html,.css,.json,.yaml,.yml,.toml,.xml" class="hidden">
+        <div id="uploaded-files" class="flex flex-wrap gap-2 mb-3 hidden"></div>
+        <button onclick="startDebate()" class="btn-primary px-6 py-2.5 text-white font-medium rounded-xl text-sm">开始辩论</button>
+      </div>
+
+      <!-- Token summary (lobby) -->
+      <div id="token-summary" class="glass rounded-xl p-4 mb-4 hidden fade-slide-up">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs text-gray-400 font-medium">Token 消耗概览</span>
+          <span id="token-total-all" class="text-xs text-indigo-400 stat-number font-medium"></span>
+        </div>
+        <div id="token-models-bars" class="space-y-2"></div>
+      </div>
+
+      <!-- Search -->
+      <div class="mb-4 flex items-center gap-3">
+        <div class="flex-1 relative">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <input id="search-input" type="text" placeholder="搜索辩论主题或内容..."
+            class="w-full pl-10 pr-4 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 text-sm focus:outline-none focus:border-indigo-500/50 transition" oninput="onSearchInput()">
+          <button id="search-clear" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-300 hidden" onclick="clearSearch()">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <span id="search-count" class="text-xs text-gray-600 whitespace-nowrap"></span>
+      </div>
+
+      <div id="debate-list" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div class="text-gray-600 text-sm text-center py-12 col-span-full">暂无辩论记录</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Debate View -->
+  <div id="debate-view" class="view-transition view-hidden">
+    <div class="max-w-3xl mx-auto px-4 pt-4 pb-2">
+      <div class="glass rounded-xl px-4 py-3 mb-4 flex items-center justify-between flex-wrap gap-2">
+        <div class="flex items-center gap-2 text-sm">
+          <span class="text-indigo-400 font-medium" id="debate-name-a"></span>
+          <span class="text-gray-600">vs</span>
+          <span class="text-teal-400 font-medium" id="debate-name-b"></span>
+          <span id="debate-vs-c" class="text-gray-600 hidden">vs</span>
+          <span id="debate-name-c" class="text-amber-400 font-medium hidden"></span>
+          <span id="debate-mode-badge" class="text-[10px] px-2 py-0.5 bg-white/5 text-gray-500 rounded-full ml-1"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btn-stop" onclick="stopDebate()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg hidden">停止</button>
+          <button id="btn-delete" onclick="deleteDebate()" class="btn-danger px-3 py-1.5 text-xs text-red-400 rounded-lg hidden">删除</button>
+          <button id="btn-export" onclick="exportMarkdown()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg hidden">导出 MD</button>
+          <button id="btn-export-pdf" onclick="exportPDF()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg hidden">导出 PDF</button>
+          <button id="btn-compile" onclick="compileDerivation()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg hidden">整理推导</button>
+          <button id="btn-analyze" onclick="analyzePersuasion()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg hidden">说服力</button>
+          <button id="btn-score" onclick="autoScore()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg hidden">评分</button>
+        </div>
+      </div>
+      <!-- Token usage bar (debate view) -->
+      <div id="debate-token-bar" class="glass rounded-xl px-4 py-2.5 mb-4 hidden">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] text-gray-500">Token 消耗</span>
+          <span id="debate-token-total" class="text-[10px] text-indigo-400 stat-number"></span>
+        </div>
+        <div id="debate-token-bars" class="flex gap-1 h-3 rounded overflow-hidden bg-white/5"></div>
+        <div id="debate-token-legend" class="flex flex-wrap gap-3 mt-1.5"></div>
+      </div>
+    </div>
+    <div id="debate-topic-bar" class="max-w-3xl mx-auto px-4 mb-2 hidden">
+      <div class="glass rounded-lg px-4 py-2.5">
+        <div class="text-[10px] text-gray-600 mb-1">讨论主题</div>
+        <div id="debate-topic-text" class="text-sm text-gray-200 leading-relaxed"></div>
+      </div>
+    </div>
+    <div class="flex max-w-6xl mx-auto">
+      <div id="conversation" class="flex-1 max-w-3xl px-4 py-2 space-y-4 pb-8"></div>
+      <div id="round-timeline" class="hidden flex-shrink-0 sticky top-16 self-start mt-2 ml-4" style="width: 180px; max-height:calc(100vh - 5rem); overflow-y:auto; padding-right: 4px;">
+        <div class="text-[10px] text-gray-600 text-center mb-3 tracking-wider uppercase font-medium">轮次导航</div>
+        <div class="relative flex flex-col items-start gap-2">
+          <div id="timeline-line" class="absolute left-[8px] top-0 bottom-0 w-0.5 bg-gradient-to-b from-indigo-500/15 via-white/5 to-teal-500/15 rounded-full tl-line-anim"></div>
+          <div id="timeline-dots" class="flex flex-col items-start gap-2 w-full"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compile Modal -->
+  <div id="compile-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden" onclick="if(event.target===this)closeCompileModal()">
+    <div class="glass rounded-2xl p-6 w-full max-w-3xl max-h-[80vh] overflow-y-auto mx-4 fade-slide-up">
+      <div class="flex justify-between items-center mb-4">
+        <div>
+          <h2 class="text-lg font-bold text-indigo-400">整理后的推导</h2>
+          <p id="compile-model-info" class="text-xs text-gray-500 mt-1"></p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="copyCompiled()" class="btn-ghost px-3 py-1 text-xs text-gray-300 rounded-lg">复制</button>
+          <button onclick="exportCompiledMD()" class="btn-ghost px-3 py-1 text-xs text-gray-300 rounded-lg">导出 MD</button>
+          <button onclick="exportCompiledPDF()" class="btn-ghost px-3 py-1 text-xs text-gray-300 rounded-lg">导出 PDF</button>
+          <button onclick="closeCompileModal()" class="btn-ghost px-3 py-1 text-xs text-gray-300 rounded-lg">关闭</button>
+        </div>
+      </div>
+      <div id="compile-content" class="prose prose-invert max-w-none"></div>
+    </div>
+  </div>
+
+  <!-- Analysis Modal (Persuasion + Scoring) -->
+  <div id="analysis-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden" onclick="if(event.target===this)closeAnalysisModal()">
+    <div class="glass rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto mx-4 fade-slide-up">
+      <div class="flex justify-between items-center mb-4">
+        <h2 id="analysis-title" class="text-lg font-bold text-indigo-400">分析报告</h2>
+        <button onclick="closeAnalysisModal()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
+      </div>
+      <div id="analysis-content" class="prose prose-invert max-w-none text-sm"></div>
+    </div>
+  </div>
+
+  <!-- Stats Panel Modal -->
+  <div id="stats-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden" onclick="if(event.target===this)closeStatsPanel()">
+    <div class="glass rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto mx-4 fade-slide-up">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-bold text-white">辩论统计</h2>
+        <button onclick="closeStatsPanel()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
+      </div>
+      <div id="stats-content"></div>
+    </div>
+  </div>
+
+  <!-- Model Manager Modal -->
+  <div id="model-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden" onclick="if(event.target===this)closeModelManager()">
+    <div class="glass rounded-2xl p-6 w-full max-w-lg max-h-[80vh] overflow-y-auto mx-4 fade-slide-up">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-lg font-bold text-white">模型管理</h2>
+        <button onclick="closeModelManager()" class="text-gray-500 hover:text-white transition text-xl">&times;</button>
+      </div>
+      <div class="mb-4">
+        <h3 class="text-xs text-gray-500 uppercase tracking-wider mb-2">内置模型</h3>
+        <div id="global-models-list" class="space-y-2"></div>
+      </div>
+      <div class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-xs text-gray-500 uppercase tracking-wider">我的模型</h3>
+          <button onclick="showAddModelForm()" class="text-xs text-indigo-400 hover:text-indigo-300 transition">+ 添加模型</button>
+        </div>
+        <div id="user-models-list" class="space-y-2"></div>
+        <div id="add-model-form" class="hidden mt-3 glass rounded-xl p-4 space-y-3">
+          <input id="am-name" type="text" placeholder="模型名称" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <input id="am-url" type="text" placeholder="Base URL" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <input id="am-key" type="password" placeholder="API Key" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <input id="am-model" type="text" placeholder="Model ID" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <div class="flex items-center gap-3">
+            <label class="text-xs text-gray-500">认证方式</label>
+            <select id="am-auth" class="px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs">
+              <option value="bearer">Bearer Token</option>
+              <option value="api-key">API Key (Header)</option>
+              <option value="anthropic">Anthropic</option>
+            </select>
+          </div>
+          <div class="flex gap-2">
+            <button onclick="addModel()" class="btn-primary px-4 py-1.5 text-white text-xs rounded-lg">保存</button>
+            <button onclick="hideAddModelForm()" class="btn-ghost px-4 py-1.5 text-gray-400 text-xs rounded-lg">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== Topic Library ===== */
+const TOPIC_LIBRARY = [
+  {cat:'数学', topics:['证明素数有无穷多个','求积分 ∫₀^∞ e^(-x²) dx','黎曼猜想的对数密度版本','贝叶斯定理 vs 频率学派的争议','连续统假设是否独立于ZFC？','费马大定理的核心思路']},
+  {cat:'物理', topics:['双缝实验的量子力学解释','相对论中的双生子佯谬','量子纠缠是否违反局域性？','黑洞信息悖论的最新进展','麦克斯韦妖与热力学第二定律','暗能量 vs 宇宙常数']},
+  {cat:'代码', topics:['实现一个高效的LRU Cache','红黑树 vs B+树在数据库中的选择','Raft共识算法的正确性证明','async/await的底层实现原理','垃圾回收：引用计数 vs 标记清除','分布式事务的2PC vs 3PC']},
+  {cat:'AI', topics:['Transformer的自注意力机制是否本质是图算法？','RLHF对齐是否会限制模型能力？','Scaling Law是否会在大参数量时失效？','MoE vs Dense模型在大规模场景的选择','LLM的涌现能力是真实存在的吗？','检索增强生成(RAG) vs 长上下文窗口']},
+  {cat:'辩论', topics:['通用人工智能(AGI)是否会在2050年前实现？','AI辅助编程是否会取代大部分软件工程师？','开源大模型能否超越闭源模型？','AI是否应该被赋予法律主体地位？','量子计算是否会对RSA加密构成实际威胁？','人类是否应该暂停AI能力的前沿研发？']},
+];
+
+function toggleTopicLib() {
+  const el = document.getElementById('topic-lib');
+  if (!el.classList.contains('hidden')) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  if (el.children.length) return;
+  TOPIC_LIBRARY.forEach(cat => {
+    const group = document.createElement('div');
+    group.className = 'w-full';
+    group.innerHTML = `<div class="text-[10px] text-gray-500 mb-1">${escHtml(cat.cat)}</div><div class="flex flex-wrap gap-1.5">${cat.topics.map(t => `<button class="topic-chip text-[10px] px-2 py-1 bg-white/5 border border-white/8 rounded-lg text-gray-400 hover:text-indigo-300" onclick="selectTopic('${escHtml(t).replace(/'/g, "\\'")}')">${escHtml(t)}</button>`).join('')}</div>`;
+    el.appendChild(group);
+  });
+}
+
+function selectTopic(t) { document.getElementById('topic-input').value = t; }
+
+/* ===== Import/Export Config ===== */
+function exportConfig() {
+  const cfg = {
+    mode: currentMode,
+    model_a: document.getElementById('select-a').value,
+    model_b: document.getElementById('select-b').value,
+    model_c: document.getElementById('select-c').value,
+    max_rounds: document.getElementById('cfg-rounds').value,
+    disagreement_threshold: document.getElementById('cfg-threshold').value,
+    topic: document.getElementById('topic-input').value,
+    memory_masking: document.getElementById('toggle-masking').checked,
+    masking_model: document.getElementById('select-masking-model').value,
+    diversity_retention: document.getElementById('toggle-diversity').checked,
+    embedding_url: document.getElementById('emb-url').value,
+    embedding_key: document.getElementById('emb-key').value,
+    embedding_model: document.getElementById('emb-model').value,
+  };
+  downloadFile('debate_config.json', JSON.stringify(cfg, null, 2), 'application/json');
+  showToast('配置已导出');
+}
+
+function importConfig() {
+  const input = document.createElement('input');
+  input.type = 'file'; input.accept = '.json';
+  input.onchange = async (e) => {
+    try {
+      const text = await e.target.files[0].text();
+      const cfg = JSON.parse(text);
+      if (cfg.mode) setMode(cfg.mode);
+      if (cfg.model_a) document.getElementById('select-a').value = cfg.model_a;
+      if (cfg.model_b) document.getElementById('select-b').value = cfg.model_b;
+      if (cfg.model_c && cfg.mode === 'chain3') document.getElementById('select-c').value = cfg.model_c;
+      if (cfg.max_rounds) document.getElementById('cfg-rounds').value = cfg.max_rounds;
+      if (cfg.disagreement_threshold) document.getElementById('cfg-threshold').value = cfg.disagreement_threshold;
+      if (cfg.topic) document.getElementById('topic-input').value = cfg.topic;
+      if (cfg.memory_masking) { document.getElementById('toggle-masking').checked = true; document.getElementById('masking-model-row').classList.remove('hidden'); if (cfg.masking_model) document.getElementById('select-masking-model').value = cfg.masking_model; }
+      if (cfg.diversity_retention) { document.getElementById('toggle-diversity').checked = true; document.getElementById('embedding-config').classList.remove('hidden'); if (cfg.embedding_url) document.getElementById('emb-url').value = cfg.embedding_url; if (cfg.embedding_model) document.getElementById('emb-model').value = cfg.embedding_model; if (cfg.embedding_key) document.getElementById('emb-key').value = cfg.embedding_key; }
+      showToast('配置已导入');
+    } catch(e) { showToast('导入失败: 无效的JSON'); }
+  };
+  input.click();
+}
+
+/* ===== Stats Panel ===== */
+function openStatsPanel() {
+  document.getElementById('stats-modal').classList.remove('hidden');
+  renderStats();
+}
+
+function closeStatsPanel() { document.getElementById('stats-modal').classList.add('hidden'); }
+
+function renderStats() {
+  const all = Object.values(debates);
+  const total = all.length;
+  const running = all.filter(d => d.status === 'running').length;
+  const finished = all.filter(d => d.status !== 'running' && d.status !== 'idle');
+  const consensus = all.filter(d => d.status === 'consensus').length;
+  const disagreement = all.filter(d => d.status === 'disagreement').length;
+  const maxRoundsHit = all.filter(d => d.status === 'max_rounds').length;
+  const totalRounds = all.reduce((s, d) => s + (d.round || 0), 0);
+  const avgRounds = finished.length ? (totalRounds / finished.length).toFixed(1) : 0;
+
+  // Mode distribution
+  const modeCounts = {};
+  all.forEach(d => { modeCounts[d.mode || 'sequential'] = (modeCounts[d.mode || 'sequential'] || 0) + 1; });
+
+  // Token stats
+  let totalTokens = 0;
+  const modelTokens = {};
+  all.forEach(d => {
+    const usage = d.token_usage || {};
+    Object.entries(usage).forEach(([name, u]) => {
+      if (name === '_total') { totalTokens += u; return; }
+      if (typeof u === 'object' && u.total) {
+        modelTokens[name] = (modelTokens[name] || 0) + u.total;
+      }
+    });
+  });
+
+  // Win rate by model
+  const modelWins = {};
+  all.forEach(d => {
+    if (d.status === 'consensus') {
+      [d.name_a, d.name_b, d.name_c].filter(Boolean).forEach(n => { modelWins[n] = (modelWins[n] || {wins:0, total:0}); modelWins[n].wins++; modelWins[n].total++; });
+    } else if (d.status !== 'running' && d.status !== 'idle') {
+      [d.name_a, d.name_b, d.name_c].filter(Boolean).forEach(n => { modelWins[n] = (modelWins[n] || {wins:0, total:0}); modelWins[n].total++; });
+    }
+  });
+
+  const el = document.getElementById('stats-content');
+  el.innerHTML = `
+    <div class="grid grid-cols-3 gap-3 mb-4">
+      <div class="bg-white/5 rounded-xl p-3 text-center">
+        <div class="text-2xl font-bold text-white stat-number">${total}</div>
+        <div class="text-[10px] text-gray-500 mt-1">总辩论数</div>
+      </div>
+      <div class="bg-white/5 rounded-xl p-3 text-center">
+        <div class="text-2xl font-bold text-emerald-400 stat-number">${consensus}</div>
+        <div class="text-[10px] text-gray-500 mt-1">达成共识</div>
+      </div>
+      <div class="bg-white/5 rounded-xl p-3 text-center">
+        <div class="text-2xl font-bold text-amber-400 stat-number">${avgRounds}</div>
+        <div class="text-[10px] text-gray-500 mt-1">平均轮数</div>
+      </div>
+    </div>
+    <div class="space-y-3">
+      <div class="bg-white/5 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">结果分布</div>
+        <div class="flex gap-1 h-4 rounded-full overflow-hidden">
+          ${consensus ? `<div class="bg-emerald-500" style="width:${(consensus/finished.length*100)||0}%" title="共识 ${consensus}"></div>` : ''}
+          ${disagreement ? `<div class="bg-amber-500" style="width:${(disagreement/finished.length*100)||0}%" title="分歧 ${disagreement}"></div>` : ''}
+          ${maxRoundsHit ? `<div class="bg-orange-500" style="width:${(maxRoundsHit/finished.length*100)||0}%" title="达上限 ${maxRoundsHit}"></div>` : ''}
+          ${running ? `<div class="bg-indigo-500" style="width:${(running/total*100)||0}%" title="进行中 ${running}"></div>` : ''}
+        </div>
+        <div class="flex gap-3 mt-2 text-[10px] text-gray-500">
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>共识 ${consensus}</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>分歧 ${disagreement}</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>达上限 ${maxRoundsHit}</span>
+        </div>
+      </div>
+      <div class="bg-white/5 rounded-xl p-3">
+        <div class="text-xs text-gray-400 mb-2">模式分布</div>
+        <div class="flex gap-2">
+          ${Object.entries(modeCounts).map(([m,c]) => `<div class="flex-1 text-center"><div class="text-lg font-bold text-white stat-number">${c}</div><div class="text-[10px] text-gray-500">${{sequential:'交替',blind:'独立',chain3:'三人'}[m]||m}</div></div>`).join('')}
+        </div>
+      </div>
+      ${totalTokens > 0 ? `
+      <div class="bg-white/5 rounded-xl p-3">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-xs text-gray-400">Token 消耗</span>
+          <span class="text-xs text-indigo-400 stat-number">${formatNum(totalTokens)}</span>
+        </div>
+        ${Object.entries(modelTokens).sort((a,b)=>b[1]-a[1]).map(([name, tokens]) => `
+          <div class="flex items-center gap-2 mb-1">
+            <span class="text-[10px] text-gray-400 w-24 truncate">${escHtml(name)}</span>
+            <div class="flex-1 h-2 bg-white/5 rounded-full overflow-hidden"><div class="h-full bg-indigo-500/60 rounded-full" style="width:${tokens/totalTokens*100}%"></div></div>
+            <span class="text-[10px] text-gray-500 stat-number w-16 text-right">${formatNum(tokens)}</span>
+          </div>
+        `).join('')}
+      </div>` : ''}
+    </div>`;
+}
+
+function formatNum(n) { return n >= 1000000 ? (n/1000000).toFixed(1)+'M' : n >= 1000 ? (n/1000).toFixed(1)+'K' : String(n); }
+
+/* ===== Token Display ===== */
+function updateTokenSummary() {
+  // Lobby summary
+  const allDebates = Object.values(debates);
+  let totalAll = 0;
+  const modelTotals = {};
+  allDebates.forEach(d => {
+    const u = d.token_usage || {};
+    Object.entries(u).forEach(([name, v]) => {
+      if (name === '_total' || typeof v !== 'object') return;
+      modelTotals[name] = (modelTotals[name] || 0) + (v.total || 0);
+      totalAll += (v.total || 0);
+    });
+  });
+
+  const summary = document.getElementById('token-summary');
+  if (totalAll > 0) {
+    summary.classList.remove('hidden');
+    document.getElementById('token-total-all').textContent = formatNum(totalAll);
+    const bars = Object.entries(modelTotals).sort((a,b)=>b[1]-a[1]);
+    document.getElementById('token-models-bars').innerHTML = bars.map(([name, tokens]) => `
+      <div class="flex items-center gap-2">
+        <span class="text-[10px] text-gray-400 w-28 truncate">${escHtml(name)}</span>
+        <div class="flex-1 h-2 bg-white/5 rounded-full overflow-hidden"><div class="token-bar bg-indigo-500/60" style="width:${tokens/totalAll*100}%"></div></div>
+        <span class="text-[10px] text-gray-500 stat-number w-14 text-right">${formatNum(tokens)}</span>
+      </div>
+    `).join('');
+  }
+}
+
+function updateDebateTokenBar(d) {
+  const bar = document.getElementById('debate-token-bar');
+  const u = d.token_usage || {};
+  const models = Object.entries(u).filter(([k,v]) => k !== '_total' && typeof v === 'object');
+  if (!models.length) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  const total = models.reduce((s,[,v]) => s + (v.total||0), 0);
+  document.getElementById('debate-token-total').textContent = formatNum(total);
+  const colors = ['#818cf8','#2dd4bf','#f59e0b'];
+  document.getElementById('debate-token-bars').innerHTML = models.map(([name, v], i) =>
+    `<div class="h-full transition-all duration-500" style="width:${v.total/total*100}%;background:${colors[i%3]}"></div>`
+  ).join('');
+  document.getElementById('debate-token-legend').innerHTML = models.map(([name, v], i) =>
+    `<span class="flex items-center gap-1 text-[10px] text-gray-400"><span class="w-2 h-2 rounded-full inline-block" style="background:${colors[i%3]}"></span>${escHtml(name)} ${formatNum(v.total)}</span>`
+  ).join('');
+}
+
+/* ===== Persuasion Analysis ===== */
+async function analyzePersuasion() {
+  if (!currentDebateId) return;
+  const modal = document.getElementById('analysis-modal');
+  const content = document.getElementById('analysis-content');
+  document.getElementById('analysis-title').textContent = '说服力分析';
+  modal.classList.remove('hidden');
+  content.innerHTML = '<p class="text-gray-400"><span class="spinner mr-2"></span>分析中...</p>';
+  try {
+    const res = await fetch(`/api/debate/analyze/${currentDebateId}`, {headers: authHeaders()});
+    const data = await res.json();
+    if (!res.ok) { content.innerHTML = `<p class="text-red-400">${escHtml(data.detail || '分析失败')}</p>`; return; }
+    renderContent(content, data.content);
+  } catch(e) { content.innerHTML = `<p class="text-red-400">请求失败</p>`; }
+}
+
+function closeAnalysisModal() { document.getElementById('analysis-modal').classList.add('hidden'); }
+
+/* ===== Auto Scoring ===== */
+async function autoScore() {
+  if (!currentDebateId) return;
+  const modal = document.getElementById('analysis-modal');
+  const content = document.getElementById('analysis-content');
+  document.getElementById('analysis-title').textContent = '辩论评分';
+  modal.classList.remove('hidden');
+  content.innerHTML = '<p class="text-gray-400"><span class="spinner mr-2"></span>评分中...</p>';
+  try {
+    const res = await fetch(`/api/debate/score/${currentDebateId}`, {headers: authHeaders()});
+    const data = await res.json();
+    if (!res.ok) { content.innerHTML = `<p class="text-red-400">${escHtml(data.detail || '评分失败')}</p>`; return; }
+    renderContent(content, data.content);
+  } catch(e) { content.innerHTML = `<p class="text-red-400">请求失败</p>`; }
+}
+
+/* ===== State ===== */
+let currentView = 'lobby';
+let currentDebateId = null;
+let currentMode = 'sequential';
+let debates = {};
+let modelHealthData = {};
+let globalModels = {};
+let userModels = {};
+let compiledContent = '';
+let lobbyPollTimer = null;
+let debatePollTimer = null;
+let lastRenderedRound = 0;
+let uploadedFiles = [];
+let searchQuery = '';
+let searchDebounce = null;
+let authToken = '';
+let currentUser = null;
+let wsConnection = null;  // WebSocket for debate streaming
+
+/* ===== Auth ===== */
+function switchAuthTab(tab) {
+  document.getElementById('form-login').classList.toggle('hidden', tab !== 'login');
+  document.getElementById('form-register').classList.toggle('hidden', tab !== 'register');
+  document.getElementById('tab-login').className = `flex-1 py-2 text-sm font-medium rounded-lg ${tab === 'login' ? 'tab-active' : 'tab-inactive'}`;
+  document.getElementById('tab-register').className = `flex-1 py-2 text-sm font-medium rounded-lg ${tab === 'register' ? 'tab-active' : 'tab-inactive'}`;
+}
+
+function showAuthError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg; el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  try {
+    const res = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password})});
+    if (!res.ok) { const d = await res.json(); showAuthError('login-error', d.detail || '登录失败'); return; }
+    const data = await res.json();
+    authToken = data.token;
+    localStorage.setItem('debate_token', authToken);
+    currentUser = {username: data.username};
+    enterApp();
+  } catch(e) { showAuthError('login-error', '网络错误'); }
+}
+
+async function doRegister() {
+  const username = document.getElementById('reg-user').value.trim();
+  const password = document.getElementById('reg-pass').value;
+  const password2 = document.getElementById('reg-pass2').value;
+  if (password !== password2) { showAuthError('reg-error', '两次密码不一致'); return; }
+  try {
+    const res = await fetch('/api/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({username, password})});
+    if (!res.ok) { const d = await res.json(); showAuthError('reg-error', d.detail || '注册失败'); return; }
+    showToast('注册成功，请登录');
+    switchAuthTab('login');
+    document.getElementById('login-user').value = username;
+    document.getElementById('login-pass').focus();
+  } catch(e) { showAuthError('reg-error', '网络错误'); }
+}
+
+async function doLogout() {
+  try { await fetch('/api/auth/logout', {method:'POST', headers:{'Authorization': `Bearer ${authToken}`}}); } catch(e) {}
+  authToken = ''; currentUser = null;
+  localStorage.removeItem('debate_token');
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('auth-gate').classList.remove('hidden');
+}
+
+function enterApp() {
+  document.getElementById('auth-gate').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('username-display').textContent = currentUser?.username || '';
+  if (currentUser?.is_admin) document.getElementById('admin-link')?.classList.remove('hidden');
+  loadModels();
+  loadQuotaInfo();
+  startLobbyPoll();
+  initDropZone();
+}
+
+async function checkAuth() {
+  const saved = localStorage.getItem('debate_token');
+  if (!saved) return false;
+  try {
+    const res = await fetch('/api/auth/me', {headers:{'Authorization': `Bearer ${saved}`}});
+    if (!res.ok) { localStorage.removeItem('debate_token'); return false; }
+    authToken = saved;
+    currentUser = await res.json();
+    return true;
+  } catch(e) { return false; }
+}
+
+/* ===== Init ===== */
+document.addEventListener('DOMContentLoaded', async () => {
+  if (await checkAuth()) enterApp();
+});
+
+/* ===== Models ===== */
+function authHeaders() { return {'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json'}; }
+
+async function loadQuotaInfo() {
+  try {
+    const res = await fetch('/api/user/quota', {headers: authHeaders()});
+    if (!res.ok) return;
+    const d = await res.json();
+    const el = document.getElementById('quota-badge');
+    el.textContent = `配额 ${d.used}/${d.limit}`;
+    el.className = 'text-xs px-2 py-1 rounded-full ' + (
+      d.remaining <= 0 ? 'bg-red-500/10 text-red-400' :
+      d.remaining <= 10 ? 'bg-amber-500/10 text-amber-400' :
+      'bg-white/5 text-gray-500'
+    );
+  } catch(e) {}
+}
+
+async function loadModels() {
+  const [cfgRes, availRes] = await Promise.all([
+    fetch('/api/config'),
+    fetch('/api/user/models/available', {headers: authHeaders()}),
+  ]);
+  const cfgData = await cfgRes.json();
+  const availData = await availRes.json();
+  modelHealthData = {};
+  globalModels = {};
+  const selA = document.getElementById('select-a'), selB = document.getElementById('select-b');
+  const selC = document.getElementById('select-c');
+  const selM = document.getElementById('select-masking-model');
+  selA.innerHTML = ''; selB.innerHTML = ''; selC.innerHTML = ''; selM.innerHTML = '';
+  let first = true, second = false;
+
+  for (const [id, m] of Object.entries(cfgData.models)) {
+    modelHealthData[id] = m.health || {};
+    globalModels[id] = m;
+    const dot = m.health?.ok ? '[OK]' : (m.health ? '[ERR]' : '[?]');
+    const label = `${m.name} ${dot}`;
+    selA.add(new Option(label, `global:${id}`, false, first));
+    selB.add(new Option(label, `global:${id}`, false, second));
+    selC.add(new Option(label, `global:${id}`, false, false));
+    selM.add(new Option(label, `global:${id}`, false, false));
+    if (first) { first = false; second = true; }
+  }
+
+  userModels = {};
+  const userEntries = Object.entries(availData.models || {}).filter(([k,v]) => v.source === 'user');
+  for (const [id, m] of userEntries) {
+    userModels[id] = m;
+    const label = `${m.name}`;
+    selA.add(new Option(label, id, false, first));
+    selB.add(new Option(label, id, false, second));
+    selC.add(new Option(label, id));
+    selM.add(new Option(label, id));
+    if (first) { first = false; second = true; }
+  }
+
+  // Re-order: put user models first (they were appended after globals)
+  for (const sel of [selA, selB, selC, selM]) {
+    const opts = Array.from(sel.options);
+    opts.sort((a, b) => {
+      const ua = a.value.startsWith('user:'), ub = b.value.startsWith('user:');
+      if (ua !== ub) return ub - ua; // user models first
+      return 0;
+    });
+    sel.innerHTML = '';
+    for (const o of opts) sel.add(o);
+  }
+
+  // Grey out global models without keys
+  for (const sel of [selA, selB, selC, selM]) {
+    for (const opt of sel.options) {
+      if (opt.value.startsWith('global:')) {
+        const mid = opt.value.replace('global:', '');
+        if (!globalModels[mid]?.has_key) {
+          opt.textContent = opt.textContent + ' [未配置Key]';
+          opt.disabled = true;
+        }
+      }
+    }
+  }
+
+  renderHealthIndicators();
+}
+
+function toggleAdvanced() {
+  const panel = document.getElementById('advanced-panel');
+  const arrow = document.getElementById('adv-arrow');
+  panel.classList.toggle('hidden');
+  arrow.style.transform = panel.classList.contains('hidden') ? '' : 'rotate(90deg)';
+}
+
+document.getElementById('toggle-masking').addEventListener('change', function() {
+  document.getElementById('masking-model-row').classList.toggle('hidden', !this.checked);
+});
+document.getElementById('toggle-diversity').addEventListener('change', function() {
+  document.getElementById('embedding-config').classList.toggle('hidden', !this.checked);
+});
+
+function renderHealthIndicators() {
+  const headerEl = document.getElementById('header-health');
+  const dots = Object.values(modelHealthData).map(h => `<span class="health-dot ${h.ok ? 'health-ok' : 'health-err'}"></span>`).join('');
+  headerEl.innerHTML = dots;
+}
+
+/* ===== Mode ===== */
+function setMode(mode) {
+  currentMode = mode;
+  document.getElementById('mode-sequential').classList.toggle('active', mode === 'sequential');
+  document.getElementById('mode-blind').classList.toggle('active', mode === 'blind');
+  document.getElementById('mode-chain3').classList.toggle('active', mode === 'chain3');
+  document.getElementById('model-c-wrapper').classList.toggle('hidden', mode !== 'chain3');
+}
+
+/* ===== Model Manager ===== */
+function openModelManager() {
+  document.getElementById('model-modal').classList.remove('hidden');
+  renderGlobalModels();
+  renderUserModels();
+}
+
+function closeModelManager() {
+  document.getElementById('model-modal').classList.add('hidden');
+  hideAddModelForm();
+}
+
+function renderGlobalModels() {
+  const el = document.getElementById('global-models-list');
+  el.innerHTML = Object.entries(globalModels).map(([id, m]) => `
+    <div class="flex items-center justify-between py-2 px-3 bg-white/3 rounded-lg">
+      <div class="flex items-center gap-2">
+        <span class="health-dot ${modelHealthData[id]?.ok ? 'health-ok' : 'health-err'}"></span>
+        <span class="text-sm text-gray-300">${escHtml(m.name)}</span>
+      </div>
+      <span class="text-[10px] px-1.5 py-0.5 bg-white/5 text-gray-600 rounded">内置</span>
+    </div>
+  `).join('');
+}
+
+function renderUserModels() {
+  const el = document.getElementById('user-models-list');
+  const entries = Object.entries(userModels);
+  if (!entries.length) { el.innerHTML = '<p class="text-xs text-gray-600 py-2">暂无自定义模型</p>'; return; }
+  el.innerHTML = entries.map(([id, m]) => `
+    <div class="flex items-center justify-between py-2 px-3 bg-white/3 rounded-lg">
+      <div>
+        <div class="text-sm text-gray-300">${escHtml(m.name)}</div>
+        <div class="text-[10px] text-gray-600">${escHtml(m.model)} · ${escHtml(m.base_url)}</div>
+      </div>
+      <button onclick="removeModel('${id}')" class="text-xs text-red-400/70 hover:text-red-400">删除</button>
+    </div>
+  `).join('');
+}
+
+function showAddModelForm() { document.getElementById('add-model-form').classList.remove('hidden'); }
+function hideAddModelForm() {
+  document.getElementById('add-model-form').classList.add('hidden');
+  ['am-name','am-url','am-key','am-model'].forEach(id => document.getElementById(id).value = '');
+}
+
+async function addModel() {
+  const name = document.getElementById('am-name').value.trim();
+  const base_url = document.getElementById('am-url').value.trim();
+  const api_key = document.getElementById('am-key').value.trim();
+  const model = document.getElementById('am-model').value.trim();
+  const auth_type = document.getElementById('am-auth').value;
+  if (!all([name, base_url, api_key, model])) { showToast('请填写所有字段'); return; }
+  try {
+    const res = await fetch('/api/user/models', {method:'POST', headers: authHeaders(), body: JSON.stringify({name, base_url, api_key, model, auth_type})});
+    if (!res.ok) { showToast('添加失败'); return; }
+    hideAddModelForm();
+    await loadModels();
+    renderUserModels();
+    showToast('模型已添加');
+  } catch(e) { showToast('添加失败'); }
+}
+
+async function removeModel(id) {
+  if (!confirm('确定删除此模型？')) return;
+  const mid = id.replace('user:', '');
+  try {
+    await fetch(`/api/user/models/${mid}`, {method:'DELETE', headers: authHeaders()});
+    await loadModels();
+    renderUserModels();
+    showToast('已删除');
+  } catch(e) { showToast('删除失败'); }
+}
+
+function all(arr) { return arr.every(Boolean); }
+
+/* ===== File Upload ===== */
+function initDropZone() {
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => { if (e.target.files.length) handleFiles(e.target.files); fileInput.value = ''; });
+  ['dragenter','dragover'].forEach(evt => { dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('drop-zone-active'); }); });
+  ['dragleave','drop'].forEach(evt => { dropZone.addEventListener(evt, (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('drop-zone-active'); }); });
+  dropZone.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+  document.getElementById('topic-input').addEventListener('dragover', (e) => e.preventDefault());
+  document.getElementById('topic-input').addEventListener('drop', (e) => { e.preventDefault(); if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files); });
+}
+
+const CODE_EXTS = new Set(['py','pyw','rs','js','jsx','ts','tsx','go','java','c','cpp','h','hpp','cs','rb','php','swift','kt','scala','sh','bash','sql','r','lua','pl','hs','ml','zig','nim','dart','vue','html','css','json','yaml','yml','toml','xml','md','txt','pdf']);
+
+async function extractPdfText(file) {
+  const pdf = await pdfjsLib.getDocument({data: await file.arrayBuffer()}).promise;
+  const pages = [];
+  for (let i = 1; i <= pdf.numPages; i++) { const p = await pdf.getPage(i); pages.push((await p.getTextContent()).items.map(it => it.str).join(' ')); }
+  return pages.join('\n\n');
+}
+
+async function handleFiles(fileList) {
+  for (const file of fileList) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!CODE_EXTS.has(ext)) { alert(`不支持的格式: .${ext}`); continue; }
+    if (uploadedFiles.some(f => f.filename === file.name)) { alert(`已上传`); continue; }
+    if (ext === 'pdf') {
+      try { const text = await extractPdfText(file); if (!text.trim()) { alert('无法提取文本'); continue; } uploadedFiles.push({filename: file.name + ' (PDF)', content: text}); }
+      catch(e) { alert('PDF 解析失败'); continue; }
+    } else { uploadedFiles.push({filename: file.name, content: await file.text()}); }
+  }
+  renderFileChips();
+}
+
+function removeFile(name) { uploadedFiles = uploadedFiles.filter(f => f.filename !== name); renderFileChips(); }
+function renderFileChips() {
+  const c = document.getElementById('uploaded-files');
+  if (!uploadedFiles.length) { c.innerHTML = ''; c.classList.add('hidden'); return; }
+  c.classList.remove('hidden');
+  c.innerHTML = uploadedFiles.map(f => `<div class="file-chip flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs fade-in"><svg class="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg><span class="text-gray-300 max-w-[120px] truncate">${escHtml(f.filename)}</span><span class="text-gray-600">${(new Blob([f.content]).size/1024).toFixed(1)}KB</span><button onclick="removeFile('${escHtml(f.filename)}')" class="ml-1 text-gray-500 hover:text-red-400 transition">&times;</button></div>`).join('');
+}
+
+/* ===== Search ===== */
+function onSearchInput() {
+  const q = document.getElementById('search-input').value;
+  document.getElementById('search-clear').classList.toggle('hidden', !q);
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => doSearch(q), 300);
+}
+function clearSearch() { document.getElementById('search-input').value = ''; document.getElementById('search-clear').classList.add('hidden'); document.getElementById('search-count').textContent = ''; searchQuery = ''; renderLobby(); }
+
+async function doSearch(q) {
+  searchQuery = q.trim().toLowerCase();
+  if (!searchQuery) { document.getElementById('search-count').textContent = ''; renderLobby(); return; }
+  try {
+    const res = await fetch(`/api/debate/search?q=${encodeURIComponent(searchQuery)}`);
+    const data = await res.json();
+    document.getElementById('search-count').textContent = data.results.length ? `找到 ${data.results.length} 条` : '无结果';
+    data.results.forEach(r => { debates[r.id] = {...(debates[r.id]||{}), ...r}; });
+    renderLobby(true);
+  } catch(e) {}
+}
+
+/* ===== Lobby ===== */
+function startLobbyPoll() { pollDebates(); lobbyPollTimer = setInterval(pollDebates, 5000); }
+
+async function pollDebates() {
+  try {
+    const res = await fetch('/api/debates');
+    const data = await res.json();
+    data.debates.forEach(d => { debates[d.id] = {...(debates[d.id]||{}), ...d}; });
+    const serverIds = new Set(data.debates.map(d => d.id));
+    Object.keys(debates).forEach(id => { if (!serverIds.has(id)) delete debates[id]; });
+    renderLobby();
+    updateTokenSummary();
+  } catch(e) {}
+}
+
+function getFilteredDebates() {
+  const entries = Object.values(debates).sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+  if (!searchQuery) return entries;
+  return entries.filter(d => (d.score||0) > 0).sort((a,b) => (b.score||0) - (a.score||0));
+}
+
+function renderLobby() {
+  const list = document.getElementById('debate-list');
+  const entries = getFilteredDebates();
+  if (!entries.length) { list.innerHTML = `<div class="text-gray-600 text-sm text-center py-12 col-span-full">${searchQuery ? '未找到匹配的辩论' : '暂无辩论记录'}</div>`; return; }
+  const existingCards = list.querySelectorAll('[data-debate-id]');
+  const existingIds = new Set([...existingCards].map(el => el.dataset.debateId));
+  const newIds = new Set(entries.map(d => d.id));
+  if (newIds.size !== existingIds.size || [...newIds].some(id => !existingIds.has(id))) {
+    list.innerHTML = entries.map((d, i) => buildCardHtml(d, i)).join('');
+    return;
+  }
+  entries.forEach(d => {
+    const card = list.querySelector(`[data-debate-id="${d.id}"]`);
+    if (!card) return;
+    const isActive = d.status === 'running';
+    const sc = getStatusConfig(d.status);
+    const badge = card.querySelector('.lobby-status-badge');
+    if (badge && badge.textContent !== sc.label) { badge.textContent = sc.label; badge.className = `lobby-status-badge text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap ${sc.cls}`; }
+    const detail = card.querySelector('.lobby-status-detail');
+    if (detail) { const dt = isActive && d.status_detail ? d.status_detail : ''; if (detail.textContent !== dt) detail.textContent = dt; }
+    const ri = card.querySelector('.lobby-round-info');
+    if (ri) {
+      if (isActive) { const t = `第 ${d.round}/${d.max_rounds} 轮`; if (ri.textContent !== t) ri.textContent = t; const f = card.querySelector('.progress-fill'); if (f) f.style.width = Math.round(d.round/d.max_rounds*100)+'%'; }
+      else { const t = `共 ${d.round} 轮`; if (ri.textContent !== t) ri.textContent = t; }
+    }
+  });
+}
+
+function buildCardHtml(d, i) {
+  const isActive = d.status === 'running';
+  const sc = getStatusConfig(d.status);
+  const progress = d.max_rounds ? Math.round(d.round/d.max_rounds*100) : 0;
+  const shortTopic = d.topic.length > 40 ? d.topic.slice(0,40)+'...' : d.topic;
+  const timeStr = d.created_at ? new Date(d.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '';
+  const modeLabels = {sequential:'', blind:'独立辩论', chain3:'三人辩论'};
+  const modeLabel = modeLabels[d.mode] || '';
+  const hasC = d.mode === 'chain3' && d.name_c;
+  const tokenTotal = d.token_usage && typeof d.token_usage._total === 'number' ? d.token_usage._total : 0;
+  return `
+    <div class="glass rounded-xl p-4 cursor-pointer hover:scale-[1.02] transition-all duration-200 fade-slide-up stagger-${Math.min(i+1,4)} ${isActive?'ring-1 ring-indigo-500/20':''}" data-debate-id="${d.id}" onclick="openDebate('${d.id}')">
+      <div class="flex items-start justify-between mb-2">
+        <span class="text-sm font-medium text-white leading-tight flex-1 mr-2">${escHtml(shortTopic)}</span>
+        <span class="lobby-status-badge text-[10px] px-2 py-0.5 rounded-full whitespace-nowrap ${sc.cls}">${sc.label}</span>
+      </div>
+      <div class="lobby-status-detail text-[10px] text-indigo-400/70 mb-1 ${isActive?'':'hidden'}">${escHtml(isActive&&d.status_detail?d.status_detail:'')}</div>
+      <div class="flex items-center gap-2 text-xs text-gray-500 mb-3">
+        <span class="text-indigo-400/70">${escHtml(d.name_a)}</span><span>vs</span><span class="text-teal-400/70">${escHtml(d.name_b)}</span>
+        ${hasC ? `<span>vs</span><span class="text-amber-400/70">${escHtml(d.name_c)}</span>` : ''}
+        ${modeLabel ? `<span class="text-[10px] px-1.5 py-0.5 bg-white/5 rounded text-gray-500">${modeLabel}</span>` : ''}
+        <span class="ml-auto">${timeStr}</span>
+      </div>
+      ${isActive ? `
+        <div class="progress-bar mb-2"><div class="progress-fill bg-gradient-to-r from-indigo-500 to-teal-500" style="width:${progress}%"></div></div>
+        <div class="lobby-round-info text-[10px] text-gray-600">第 ${d.round}/${d.max_rounds} 轮</div>
+      ` : `
+        <div class="lobby-round-info text-[10px] text-gray-600 mb-2">共 ${d.round} 轮${tokenTotal ? ` · ${formatNum(tokenTotal)} tokens` : ''}</div>
+        <div class="flex gap-2" onclick="event.stopPropagation()">
+          ${d.status!=='running'&&d.status!=='error'?`<button onclick="event.stopPropagation();compileFromLobby('${d.id}')" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded">整理推导</button><button onclick="event.stopPropagation();exportFromLobby('${d.id}')" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded">导出</button>`:''}
+          <button onclick="event.stopPropagation();deleteDebateById('${d.id}')" class="btn-danger px-2 py-1 text-[10px] text-red-400/70 rounded hover:text-red-400">删除</button>
+        </div>
+      `}
+    </div>`;
+}
+
+function getStatusConfig(s) {
+  const m = {running:{label:'进行中',cls:'bg-indigo-500/20 text-indigo-400'},consensus:{label:'达成共识',cls:'bg-emerald-500/20 text-emerald-400'},disagreement:{label:'存在分歧',cls:'bg-amber-500/20 text-amber-400'},max_rounds:{label:'达到上限',cls:'bg-orange-500/20 text-orange-400'},stopped:{label:'已停止',cls:'bg-gray-500/20 text-gray-400'},error:{label:'出错',cls:'bg-red-500/20 text-red-400'},idle:{label:'等待中',cls:'bg-gray-500/20 text-gray-400'}};
+  return m[s] || {label:s,cls:'bg-gray-500/20 text-gray-400'};
+}
+
+/* ===== View Switching ===== */
+function showLobby() {
+  currentView = 'lobby';
+  document.getElementById('lobby-view').className = 'view-transition view-visible';
+  document.getElementById('debate-view').className = 'view-transition view-hidden';
+  document.getElementById('back-btn').classList.add('hidden');
+  document.getElementById('status-badge').textContent = '就绪';
+  document.getElementById('status-badge').className = 'text-xs px-3 py-1.5 rounded-full bg-white/5 text-gray-400';
+  window.scrollTo(0, 0);
+  document.getElementById('debate-topic-bar').classList.add('hidden');
+  document.getElementById('round-timeline').classList.add('hidden');
+  document.getElementById('debate-token-bar').classList.add('hidden');
+  stopDebatePoll();
+  closeWS();
+}
+
+function stopDebatePoll() { if (debatePollTimer) { clearInterval(debatePollTimer); debatePollTimer = null; } }
+
+/* ===== WebSocket ===== */
+function closeWS() { if (wsConnection) { wsConnection.close(); wsConnection = null; } }
+
+function connectWS(id) {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  wsConnection = new WebSocket(`${proto}//${location.host}/ws/debate/${id}`);
+  wsConnection.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'ping') return;
+      if (msg.type === 'init') {
+        // Initial state — history already loaded, just update status/token
+        if (msg.token_usage) {
+          if (debates[id]) debates[id].token_usage = msg.token_usage;
+          updateDebateTokenBar({token_usage: msg.token_usage});
+        }
+        return;
+      }
+      const data = msg.data || {};
+      // Handle debate events same as SSE would
+      if (msg.type === 'token_usage') {
+        if (debates[id]) debates[id].token_usage = data;
+        updateDebateTokenBar({token_usage: data});
+        return;
+      }
+      if (msg.type === 'thinking') {
+        // Append to current thinking block (handled by existing logic)
+        return;
+      }
+      if (msg.type === 'token') {
+        // Append to current message
+        return;
+      }
+      if (msg.type === 'content_start') {
+        // New message starting — handled by polling as fallback
+        return;
+      }
+      if (msg.type === 'content_end') {
+        // Message complete — trigger a poll to get the full history
+        pollDebateHistory(id);
+        return;
+      }
+      if (msg.type === 'round_end' || msg.type === 'round_start') {
+        pollDebateHistory(id);
+        return;
+      }
+      if (msg.type === 'debate_end' || msg.type === 'report_end' || msg.type === 'error') {
+        closeWS();
+        pollDebateHistory(id);
+        return;
+      }
+    } catch(e) {}
+  };
+  wsConnection.onclose = () => { wsConnection = null; };
+  wsConnection.onerror = () => {
+    // Fallback to polling if WS fails
+    closeWS();
+    debatePollTimer = setInterval(() => pollDebateHistory(id), 3000);
+  };
+}
+
+function openDebate(id) {
+  currentDebateId = id; currentView = 'debate'; lastRenderedRound = 0;
+  const d = debates[id]; if (!d) return;
+  document.getElementById('debate-name-a').textContent = d.name_a;
+  document.getElementById('debate-name-b').textContent = d.name_b;
+  const hasC = d.mode === 'chain3' && d.name_c;
+  document.getElementById('debate-vs-c').classList.toggle('hidden', !hasC);
+  document.getElementById('debate-name-c').classList.toggle('hidden', !hasC);
+  if (hasC) document.getElementById('debate-name-c').textContent = d.name_c;
+  const modeLabels = {sequential:'交替审查', blind:'独立辩论', chain3:'三人辩论'};
+  document.getElementById('debate-mode-badge').textContent = modeLabels[d.mode] || d.mode;
+  const isRunning = d.status === 'running';
+  document.getElementById('btn-stop').classList.toggle('hidden', !isRunning);
+  document.getElementById('btn-delete').classList.toggle('hidden', isRunning);
+  ['btn-export','btn-export-pdf','btn-compile','btn-analyze','btn-score'].forEach(id => document.getElementById(id).classList.toggle('hidden', isRunning));
+  document.getElementById('lobby-view').className = 'view-transition view-hidden';
+  document.getElementById('debate-view').className = 'view-transition view-visible';
+  document.getElementById('back-btn').classList.remove('hidden');
+  const tb = document.getElementById('debate-topic-bar');
+  const displayTopic = d.topic.includes('\n\n参考材料：') ? d.topic.split('\n\n参考材料：')[0] : d.topic;
+  document.getElementById('debate-topic-text').textContent = displayTopic;
+  tb.classList.remove('hidden');
+  stopDebatePoll();
+  closeWS();
+  loadConversation(id);
+  if (isRunning) connectWS(id);
+  const sc = getStatusConfig(d.status);
+  setStatus(sc.label, sc.cls);
+  updateDebateTokenBar(d);
+}
+
+async function loadConversation(id) {
+  try {
+    const res = await fetch(`/api/debate/history/${id}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const conv = document.getElementById('conversation');
+    conv.innerHTML = '';
+    document.getElementById('timeline-dots').innerHTML = '';
+    if (data.history.length) {
+      const isBlind = data.mode === 'blind';
+      const isChain3 = data.mode === 'chain3';
+      if (isBlind || isChain3) {
+        const rounds = {};
+        data.history.forEach(e => { (rounds[e.round] = rounds[e.round] || []).push(e); });
+        Object.entries(rounds).forEach(([rnd, entries]) => {
+          const label = document.createElement('div');
+          label.className = 'blind-round-label fade-in';
+          label.textContent = `第 ${rnd} 轮`;
+          conv.appendChild(label);
+          entries.forEach(e => { appendHistoryMessage(e); });
+        });
+      } else {
+        data.history.forEach(e => appendHistoryMessage(e));
+      }
+      lastRenderedRound = data.history[data.history.length - 1].round;
+    }
+    if (data.report) { appendReportCard(data.report, data.report_model); addReportTimelineDot(); }
+    updateDebateUI(id, data.status);
+    setTimeout(setupScrollSpy, 100);
+  } catch(e) {}
+}
+
+async function pollDebateHistory(id) {
+  try {
+    const res = await fetch(`/api/debate/history/${id}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const newEntries = data.history.filter(e => e.round > lastRenderedRound);
+    if (newEntries.length) {
+      if (data.mode === 'blind' || data.mode === 'chain3') {
+        const newRounds = new Set(newEntries.map(e => e.round));
+        const conv = document.getElementById('conversation');
+        newRounds.forEach(rnd => {
+          const existing = conv.querySelector(`.blind-round-label:last-of-type`);
+          const existingRound = existing ? parseInt(existing.textContent.match(/\d+/)?.[0] || 0) : 0;
+          if (rnd > existingRound || !existing) {
+            const label = document.createElement('div');
+            label.className = 'blind-round-label fade-in';
+            label.textContent = `第 ${rnd} 轮`;
+            const firstCard = conv.querySelector(`[data-round="${rnd}"]`);
+            if (firstCard) conv.insertBefore(label, firstCard);
+            else conv.appendChild(label);
+          }
+        });
+      }
+      newEntries.forEach(e => { appendHistoryMessage(e); lastRenderedRound = e.round; });
+    }
+    if (data.report && !document.getElementById('report-card')) appendReportCard(data.report, data.report_model);
+    if (data.status_detail) setStatus(data.status_detail, 'bg-indigo-500/20 text-indigo-400 animate-pulse');
+    updateDebateUI(id, data.status);
+    updateDebateTokenBar(data);
+    if (data.status !== 'running') { stopDebatePoll(); closeWS(); loadConversation(id); }
+    else if (newEntries.length) setTimeout(setupScrollSpy, 100);
+  } catch(e) {}
+}
+
+function updateDebateUI(id, status) {
+  if (debates[id]) debates[id].status = status;
+  renderLobby();
+  const sc = getStatusConfig(status);
+  const isRunning = status === 'running';
+  setStatus(sc.label, sc.cls);
+  document.getElementById('btn-stop').classList.toggle('hidden', !isRunning);
+  document.getElementById('btn-delete').classList.toggle('hidden', isRunning);
+  ['btn-export','btn-export-pdf','btn-compile','btn-analyze','btn-score'].forEach(id => document.getElementById(id).classList.toggle('hidden', isRunning));
+}
+
+function appendReportCard(content, modelName) {
+  const conv = document.getElementById('conversation');
+  if (document.getElementById('report-card')) return;
+  const card = document.createElement('div');
+  card.id = 'report-card';
+  card.className = 'msg-card glass rounded-xl p-5 fade-slide-up';
+  card.style.borderLeft = '3px solid #f59e0b';
+  card.innerHTML = `<div class="flex items-center gap-2 mb-3"><span class="text-amber-400 font-semibold text-sm">分歧分析报告</span><span class="text-xs text-gray-500">by ${escHtml(modelName)}</span></div><div class="msg-text prose prose-invert max-w-none text-sm leading-relaxed"></div>`;
+  conv.appendChild(card);
+  renderContent(card.querySelector('.msg-text'), content);
+}
+
+function appendHistoryMessage(entry) {
+  const conv = document.getElementById('conversation');
+  const d = debates[currentDebateId] || {};
+  const isA = entry.model === d.name_a;
+  const isB = entry.model === d.name_b;
+  const isC = !isA && !isB && d.name_c && entry.model === d.name_c;
+  const colorCls = isA ? 'msg-card-a' : isC ? 'msg-card-c' : 'msg-card-b';
+  const textCls = isA ? 'text-indigo-400' : isC ? 'text-amber-400' : 'text-teal-400';
+  const card = document.createElement('div');
+  card.className = `msg-card ${colorCls} glass rounded-xl p-4 fade-slide-up`;
+  card.dataset.round = entry.round;
+  card.id = `round-${entry.round}-${entry.model.replace(/[^a-zA-Z0-9]/g,'')}`;
+  card.innerHTML = `
+    <div class="flex items-center justify-between mb-2">
+      <span class="${textCls} font-medium text-sm">第 ${entry.round} 轮 — ${escHtml(entry.model)}</span>
+      ${entry.content && entry.content.trim().toUpperCase().startsWith('[AGREE]') ? '<span class="text-[10px] px-2 py-0.5 bg-emerald-500/20 text-emerald-400 rounded-full">AGREE</span>' : ''}
+      ${entry.filtered ? '<span class="text-[10px] px-2 py-0.5 bg-gray-500/20 text-gray-400 rounded-full">已过滤</span>' : ''}
+    </div>
+    <div class="msg-text prose prose-invert max-w-none text-sm leading-relaxed"></div>`;
+  conv.appendChild(card);
+  renderContent(card.querySelector('.msg-text'), entry.content || '');
+  addTimelineDot(entry.round, isA, isC, entry.model);
+}
+
+function addTimelineDot(round, isA, isC, modelName) {
+  const container = document.getElementById('timeline-dots');
+  const timeline = document.getElementById('round-timeline');
+  if (!container || !timeline) return;
+  timeline.classList.remove('hidden');
+  if (container.querySelector(`[data-round="${round}"]`)) return;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex items-center gap-2.5 tl-dot-enter';
+  wrapper.style.animationDelay = '0.05s';
+  const dot = document.createElement('div');
+  dot.className = `tl-dot ${isA ? 'tl-dot-a' : isC ? 'tl-dot-c' : 'tl-dot-b'}`;
+  dot.dataset.round = round;
+  dot.title = `第 ${round} 轮 — ${modelName}`;
+  dot.onclick = () => scrollToRound(round);
+  const info = document.createElement('div');
+  info.className = 'flex flex-col ml-1';
+  const label = document.createElement('div');
+  label.className = 'tl-label';
+  label.textContent = `R${round}`;
+  label.onclick = () => scrollToRound(round);
+  const modelLabel = document.createElement('div');
+  modelLabel.className = 'tl-model-name';
+  const shortName = modelName.length > 14 ? modelName.slice(0, 13) + '…' : modelName;
+  modelLabel.textContent = shortName;
+  modelLabel.style.color = isA ? '#818cf8' : isC ? '#f59e0b' : '#2dd4bf';
+  info.appendChild(label);
+  info.appendChild(modelLabel);
+  wrapper.appendChild(dot);
+  wrapper.appendChild(info);
+  container.appendChild(wrapper);
+}
+
+function addReportTimelineDot() {
+  const container = document.getElementById('timeline-dots');
+  if (!container) return;
+  const wrapper = document.createElement('div');
+  wrapper.className = 'flex items-center gap-2.5 tl-dot-enter mt-1';
+  const dot = document.createElement('div');
+  dot.className = 'tl-dot tl-dot-report';
+  dot.title = '报告';
+  dot.onclick = () => { const r = document.getElementById('report-card'); if (r) r.scrollIntoView({behavior:'smooth',block:'center'}); };
+  const info = document.createElement('div');
+  info.className = 'flex flex-col ml-1';
+  const label = document.createElement('div');
+  label.className = 'tl-label'; label.textContent = '报告'; label.onclick = dot.onclick;
+  const modelLabel = document.createElement('div');
+  modelLabel.className = 'tl-model-name';
+  modelLabel.textContent = '分析报告';
+  modelLabel.style.color = '#f59e0b';
+  info.appendChild(label);
+  info.appendChild(modelLabel);
+  wrapper.appendChild(dot);
+  wrapper.appendChild(info);
+  container.appendChild(wrapper);
+}
+
+function scrollToRound(round) {
+  const els = document.querySelectorAll(`[data-round="${round}"].msg-card`);
+  if (els.length) els[0].scrollIntoView({behavior:'smooth',block:'center'});
+  document.querySelectorAll('.tl-dot').forEach(d => {
+    d.classList.remove('tl-dot-active','tl-dot-active-b','tl-dot-active-c');
+    if (parseInt(d.dataset.round) === round) {
+      const card = document.querySelector(`[data-round="${round}"].msg-card`);
+      if (card) {
+        if (card.classList.contains('msg-card-c')) d.classList.add('tl-dot-active-c');
+        else if (card.classList.contains('msg-card-a')) d.classList.add('tl-dot-active');
+        else d.classList.add('tl-dot-active-b');
+      }
+    }
+  });
+}
+
+function setupScrollSpy() {
+  const conv = document.getElementById('conversation');
+  if (!conv) return;
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        const round = e.target.dataset.round;
+        if (round) document.querySelectorAll('.tl-dot').forEach(d => {
+          d.classList.remove('tl-dot-active','tl-dot-active-b','tl-dot-active-c');
+          if (d.dataset.round === round) {
+            if (e.target.classList.contains('msg-card-c')) d.classList.add('tl-dot-active-c');
+            else if (e.target.classList.contains('msg-card-a')) d.classList.add('tl-dot-active');
+            else d.classList.add('tl-dot-active-b');
+          }
+        });
+      }
+    });
+  }, {rootMargin:'-20% 0px -60% 0px'});
+  conv.querySelectorAll('.msg-card').forEach(card => observer.observe(card));
+}
+
+/* ===== Debate Control ===== */
+async function startDebate() {
+  const topic = document.getElementById('topic-input').value.trim();
+  const modelA = document.getElementById('select-a').value;
+  const modelB = document.getElementById('select-b').value;
+  const modelC = document.getElementById('select-c').value;
+  const maxRounds = parseInt(document.getElementById('cfg-rounds').value) || 20;
+  const threshold = parseInt(document.getElementById('cfg-threshold').value) || 5;
+  if (!topic) return alert('请输入讨论主题');
+  if (modelA === modelB) return alert('模型 A 和 B 不能相同');
+  if (currentMode === 'chain3') {
+    if (!modelC) return alert('三人模式需要选择模型 C');
+    if (modelC === modelA || modelC === modelB) return alert('三个模型必须不同');
+  }
+  let fullTopic = topic;
+  if (uploadedFiles.length) { fullTopic += '\n\n参考材料：\n\n' + uploadedFiles.map(f => `---\n文件: ${f.filename}\n${f.content}\n---`).join('\n\n'); }
+  const body = {
+    topic: fullTopic, model_a: modelA, model_b: modelB,
+    max_rounds: maxRounds, disagreement_threshold: threshold, mode: currentMode,
+  };
+  if (currentMode === 'chain3') body.model_c = modelC;
+  if (document.getElementById('toggle-masking').checked) {
+    body.memory_masking = true;
+    body.masking_model = document.getElementById('select-masking-model').value;
+  }
+  if (document.getElementById('toggle-diversity').checked) {
+    body.diversity_retention = true;
+    body.embedding_url = document.getElementById('emb-url').value.trim();
+    body.embedding_key = document.getElementById('emb-key').value.trim();
+    body.embedding_model = document.getElementById('emb-model').value.trim();
+    if (!body.embedding_url || !body.embedding_model) return alert('多样性保留需要填写 Embedding API 地址和模型ID');
+  }
+  try {
+    const res = await fetch('/api/debate/start', {method:'POST', headers: authHeaders(), body: JSON.stringify(body)});
+    const data = await res.json();
+    if (!res.ok) { alert(data.detail || '启动失败'); return; }
+    document.getElementById('topic-input').value = '';
+    uploadedFiles = []; renderFileChips();
+    await pollDebates();
+    loadQuotaInfo();
+    openDebate(data.session_id);
+  } catch(e) { alert('网络错误'); }
+}
+
+async function stopDebate() { if (!currentDebateId) return; await fetch(`/api/debate/stop/${currentDebateId}`, {method:'POST', headers: authHeaders()}); }
+
+async function deleteDebate() {
+  if (!currentDebateId || !confirm('确定删除？')) return;
+  await fetch(`/api/debate/${currentDebateId}`, {method:'DELETE', headers: authHeaders()});
+  delete debates[currentDebateId]; currentDebateId = null; showLobby(); renderLobby(); showToast('已删除');
+}
+async function deleteDebateById(id) {
+  if (!confirm('确定删除？')) return;
+  await fetch(`/api/debate/${id}`, {method:'DELETE', headers: authHeaders()});
+  delete debates[id]; if (currentDebateId === id) { currentDebateId = null; showLobby(); } renderLobby(); showToast('已删除');
+}
+
+/* ===== Render ===== */
+function renderContent(el, text) {
+  const lb = [], li = [];
+  let p = text.replace(/\\\[([\s\S]+?)\\\]/g, (_,t) => { lb.push(t); return `\x00LB${lb.length-1}\x00`; });
+  p = p.replace(/\$\$([\s\S]+?)\$\$/g, (_,t) => { lb.push(t); return `\x00LB${lb.length-1}\x00`; });
+  p = p.replace(/\\\(([\s\S]+?)\\\)/g, (_,t) => { li.push(t); return `\x00LI${li.length-1}\x00`; });
+  p = p.replace(/(?<!\$)\$(?!\$)([^\$\n]+?)(?<!\$)\$(?!\$)/g, (_,t) => { li.push(t); return `\x00LI${li.length-1}\x00`; });
+  let html = marked.parse(p, {breaks:true, gfm:true});
+  html = html.replace(/\x00LB(\d+)\x00/g, (_,i) => { try { return katex.renderToString(lb[parseInt(i)], {displayMode:true, throwOnError:false}); } catch(e) { return `$$${lb[i]}$$`; } });
+  html = html.replace(/\x00LI(\d+)\x00/g, (_,i) => { try { return katex.renderToString(li[parseInt(i)], {displayMode:false, throwOnError:false}); } catch(e) { return `$${li[i]}$`; } });
+  el.innerHTML = html;
+  el.querySelectorAll('pre code').forEach(b => hljs.highlightElement(b));
+}
+
+/* ===== Export ===== */
+async function exportMarkdown() { if (!currentDebateId) return; const r = await fetch(`/api/debate/export/${currentDebateId}`); const d = await r.json(); downloadFile(`debate_${currentDebateId}.md`, d.content, 'text/markdown'); }
+async function exportPDF() { if (!currentDebateId) return; showToast('生成 PDF...'); try { const r = await fetch(`/api/debate/export/pdf/${currentDebateId}`); if (!r.ok) { showToast('失败'); return; } downloadBlob(await r.blob(), `debate_${currentDebateId}.pdf`); showToast('已生成'); } catch(e) { showToast('失败'); } }
+async function exportFromLobby(id) { const r = await fetch(`/api/debate/export/${id}`); const d = await r.json(); downloadFile(`debate_${id}.md`, d.content, 'text/markdown'); }
+
+/* ===== Compile ===== */
+function compileDerivation() {
+  if (!currentDebateId) return;
+  document.getElementById('compile-modal').classList.remove('hidden');
+  const info = document.getElementById('compile-model-info');
+  const d = debates[currentDebateId];
+  info.innerHTML = `<span class="text-gray-300">使用模型：</span><select id="compile-model-select" class="px-2 py-0.5 bg-white/5 border border-white/10 rounded text-xs text-white"><option value="a">${d?escHtml(d.name_a):'模型A'}</option><option value="b">${d?escHtml(d.name_b):'模型B'}</option></select><button onclick="runCompile()" class="ml-2 px-3 py-0.5 btn-primary text-xs text-white rounded-lg">开始整理</button>`;
+  document.getElementById('compile-content').innerHTML = '';
+}
+function compileFromLobby(id) { currentDebateId = id; compileDerivation(); }
+
+async function runCompile() {
+  const sid = currentDebateId; if (!sid) return;
+  const useModel = document.getElementById('compile-model-select')?.value || 'a';
+  const content = document.getElementById('compile-content');
+  const info = document.getElementById('compile-model-info');
+  const d = debates[sid];
+  const modelName = useModel==='a'?(d?d.name_a:'A'):(d?d.name_b:'B');
+  if (debates[sid]) debates[sid]._compiling = true; renderLobby();
+  info.innerHTML = `<span class="text-indigo-400">${escHtml(modelName)}</span> <span class="text-gray-400">整理中...</span> <span class="spinner ml-1"></span>`;
+  const div = document.createElement('div');
+  div.className = 'prose prose-invert max-w-none text-sm whitespace-pre-wrap cursor-blink';
+  content.innerHTML = ''; content.appendChild(div);
+  try {
+    const res = await fetch(`/api/debate/compile/stream/${sid}?model=${useModel}`);
+    if (!res.ok) throw new Error('请求失败');
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    while (true) { const {done,value} = await reader.read(); if (done) break; fullText += decoder.decode(value,{stream:true}); div.textContent = fullText; content.scrollTop = content.scrollHeight; }
+    div.classList.remove('cursor-blink','whitespace-pre-wrap');
+    renderContent(div, fullText);
+    compiledContent = fullText;
+    info.innerHTML = `<span class="text-emerald-400">完成</span> · ${escHtml(modelName)}`;
+  } catch(e) { content.innerHTML = `<p class="text-red-400">失败: ${e.message}</p>`; info.innerHTML = '<span class="text-red-400">失败</span>'; }
+  finally { if (debates[sid]) debates[sid]._compiling = false; renderLobby(); }
+}
+
+function closeCompileModal() { document.getElementById('compile-modal').classList.add('hidden'); }
+async function copyCompiled() { if (!compiledContent) return; try { await navigator.clipboard.writeText(compiledContent); showToast('已复制'); } catch(e) { showToast('已复制'); } }
+function exportCompiledMD() { if (!compiledContent||!currentDebateId) return; downloadFile(`derivation_${currentDebateId}.md`, compiledContent, 'text/markdown'); }
+async function exportCompiledPDF() { if (!currentDebateId) return; showToast('生成 PDF...'); try { const m = document.getElementById('compile-model-select')?.value||'a'; const r = await fetch(`/api/debate/compile/pdf/${currentDebateId}`,{method:'POST',headers:{'Content-Type':'application/json','Authorization':`Bearer ${authToken}`},body:JSON.stringify({model:m})}); if (!r.ok){showToast('失败');return;} downloadBlob(await r.blob(),`derivation_${currentDebateId}.pdf`); showToast('已生成'); } catch(e) { showToast('失败'); } }
+
+/* ===== Utils ===== */
+function showToast(msg, dur=1500) { const e = document.querySelector('.toast'); if (e) e.remove(); const el = document.createElement('div'); el.className='toast'; el.textContent=msg; document.body.appendChild(el); setTimeout(()=>el.remove(), dur); }
+function setStatus(t,c) { const el=document.getElementById('status-badge'); el.textContent=t; el.className=`text-xs px-3 py-1.5 rounded-full ${c}`; }
+function downloadFile(n,c,t) { downloadBlob(new Blob([c],{type:t}),n); }
+function downloadBlob(b,n) { const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=n; a.click(); URL.revokeObjectURL(u); }
+function escHtml(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+</script>
+</body>
+</html>

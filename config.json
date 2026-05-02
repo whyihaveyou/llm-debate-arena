@@ -1,0 +1,50 @@
+{
+  "models": {
+    "mimo-v2.5-pro": {
+      "name": "小米 MiMo V2.5 Pro",
+      "base_url": "https://api.xiaomimimo.com/v1",
+      "api_key": "",
+      "model": "mimo-v2.5-pro",
+      "auth_type": "api-key"
+    },
+    "kimi-coding": {
+      "name": "Kimi For Coding (K2.5)",
+      "base_url": "https://api.kimi.com/coding/v1",
+      "api_key": "",
+      "model": "kimi-for-coding",
+      "auth_type": "anthropic"
+    },
+    "deepseek-reasoner": {
+      "name": "DeepSeek Reasoner",
+      "base_url": "https://api.deepseek.com/v1",
+      "api_key": "",
+      "model": "deepseek-reasoner",
+      "auth_type": "bearer"
+    },
+    "glm-5-turbo": {
+      "name": "智谱 GLM-5 Turbo",
+      "base_url": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "api_key": "",
+      "model": "glm-5-turbo",
+      "auth_type": "bearer"
+    }
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8765
+  },
+  "password": "CHANGE_ME",
+  "max_rounds": 20,
+  "disagreement_threshold": 5,
+  "quota": {
+    "monthly_limit": 50,
+    "topic_max_length": 2000
+  },
+  "rate_limit": {
+    "max_debates_per_hour": 10,
+    "max_concurrent_debates": 3
+  },
+  "cors": {
+    "allowed_origins": ["*"]
+  }
+}
