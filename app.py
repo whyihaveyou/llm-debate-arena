@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse, JSONResponse, Fil
 
 from config import load_config, CONFIG_DIR, CONVERSATIONS_DIR
 from debate_engine import DebateSession, LLMClient
+from chat_engine import ChatSession, CHAT_SYSTEM_PROMPTS
 from db import (init_db, create_user, verify_user, create_session, verify_session, delete_session,
     get_user_models, add_user_model, get_user_model, update_user_model, delete_user_model,
     get_quota_usage, increment_quota_usage, get_all_usage_stats, set_admin, get_all_users)
@@ -113,7 +114,11 @@ async def check_model_health():
 def load_persisted_debates():
     for f in CONVERSATIONS_DIR.glob("*.json"):
         try:
-            s = DebateSession.load_from_disk(f)
+            data = json.loads(f.read_text(encoding="utf-8"))
+            if data.get("mode") == "chat":
+                s = ChatSession.load_from_disk(f)
+            else:
+                s = DebateSession.load_from_disk(f)
             sessions[s.id] = s
         except Exception:
             pass
@@ -443,6 +448,9 @@ async def start_debate(request: Request):
 
     session = DebateSession(**kwargs)
     session.owner_id = user["user_id"]
+    lang = data.get("lang", "zh")
+    if lang in ("zh", "en"):
+        session.set_lang(lang)
     sessions[session.id] = session
     _session_users[session.id] = user["user_id"]
     _record_debate_start(user["user_id"])
@@ -552,13 +560,16 @@ async def get_history(session_id: str):
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     s = sessions[session_id]
+    usage = dict(getattr(s, "token_usage", {}))
+    if usage:
+        usage["_total"] = sum(v.get("total", 0) for v in usage.values() if isinstance(v, dict))
     return {
         "id": s.id, "topic": s.topic, "name_a": s.name_a, "name_b": s.name_b,
         "name_c": getattr(s, "name_c", ""),
         "status": s.status, "status_detail": getattr(s, "status_detail", ""),
         "round": s.round, "mode": getattr(s, "mode", "sequential"),
         "history": s.history, "report": s.report, "report_model": s.report_model,
-        "token_usage": getattr(s, "token_usage", {}),
+        "token_usage": usage,
     }
 
 
@@ -791,6 +802,165 @@ async def admin_set_admin(request: Request):
         raise HTTPException(400, "缺少 user_id")
     set_admin(user_id, is_admin)
     return {"ok": True}
+
+
+# ===== User Model Health =====
+
+_user_model_health: dict[int, dict] = {}
+_user_health_cache_time: float = 0
+USER_HEALTH_CACHE_TTL = 300  # 5 minutes
+
+@app.get("/api/user/models/health")
+async def check_user_models_health(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "未登录")
+    import time as _time
+    global _user_health_cache_time
+    if _time.time() - _user_health_cache_time < USER_HEALTH_CACHE_TTL and _user_model_health:
+        return {str(uid): h for uid, h in _user_model_health.items()}
+    import httpx
+    models = get_user_models(user["user_id"])
+    result = {}
+    for m in models:
+        mid = m["id"]
+        try:
+            auth_type = m.get("auth_type", "bearer")
+            base_url = m["base_url"].rstrip("/")
+            if auth_type == "api-key":
+                headers = {"api-key": m["api_key"], "Content-Type": "application/json"}
+            elif auth_type == "anthropic":
+                headers = {"x-api-key": m["api_key"], "Content-Type": "application/json", "anthropic-version": "2023-06-01"}
+            else:
+                headers = {"Authorization": f"Bearer {m['api_key']}", "Content-Type": "application/json"}
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+                if auth_type == "anthropic":
+                    resp = await client.get(f"{base_url}", headers=headers)
+                else:
+                    resp = await client.get(f"{base_url}/models", headers=headers)
+            result[str(mid)] = {"ok": resp.status_code < 500, "status": resp.status_code}
+        except Exception as e:
+            result[str(mid)] = {"ok": False, "error": str(e)[:80]}
+    _user_model_health = {int(k): v for k, v in result.items()}
+    _user_health_cache_time = _time.time()
+    return result
+
+
+# ===== Chat =====
+
+@app.post("/api/chat/start")
+async def start_chat(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "未登录")
+    data = await request.json()
+    model_id = data.get("model")
+    if not model_id:
+        raise HTTPException(400, "请选择模型")
+
+    allowed, rl_msg = _check_rate_limit(user["user_id"])
+    if not allowed:
+        raise HTTPException(429, rl_msg)
+
+    uses_shared = False
+    if model_id.startswith("global:"):
+        m = config["models"].get(model_id[7:])
+        if m and m.get("api_key"):
+            uses_shared = True
+    if uses_shared:
+        quota_limit = config.get("quota", {}).get("monthly_limit", 50)
+        if get_quota_usage(user["user_id"]) >= quota_limit:
+            raise HTTPException(429, f"本月共享模型使用次数已达上限 ({quota_limit})")
+
+    model_cfg = _resolve_model(model_id, user["user_id"])
+    if not model_cfg:
+        raise HTTPException(400, "模型不存在")
+    if not model_cfg.get("api_key"):
+        raise HTTPException(400, f"模型（{model_cfg.get('name', model_id)}）未配置 API Key")
+
+    client = LLMClient(
+        model_cfg["base_url"], model_cfg["api_key"],
+        model_cfg["model"], model_cfg.get("auth_type", "bearer")
+    )
+    session = ChatSession(
+        model_key=model_id, model=client,
+        name=model_cfg["name"], user_id=user["user_id"]
+    )
+    lang = data.get("lang", "zh")
+    if lang in CHAT_SYSTEM_PROMPTS:
+        session.set_lang(lang)
+    sessions[session.id] = session
+    _session_users[session.id] = user["user_id"]
+    _record_debate_start(user["user_id"])
+    if uses_shared:
+        increment_quota_usage(user["user_id"])
+    return {"session_id": session.id}
+
+
+@app.post("/api/chat/send/{session_id}")
+async def chat_send(session_id: str, request: Request):
+    if session_id not in sessions:
+        raise HTTPException(404, "会话不存在")
+    session = sessions[session_id]
+    if session.mode != "chat":
+        raise HTTPException(400, "非聊天会话")
+    if session.status == "running":
+        raise HTTPException(429, "模型正在回复中")
+
+    data = await request.json()
+    message = data.get("message", "").strip()
+    if not message:
+        raise HTTPException(400, "消息不能为空")
+
+    if not session.model:
+        user_id = getattr(session, 'owner_id', None)
+        model_cfg = _resolve_model(session.model_key, user_id)
+        if not model_cfg or not model_cfg.get("api_key"):
+            raise HTTPException(400, "模型配置已失效，请删除此会话并重新创建")
+        session.model = LLMClient(
+            model_cfg["base_url"], model_cfg["api_key"],
+            model_cfg["model"], model_cfg.get("auth_type", "bearer")
+        )
+
+    asyncio.create_task(session.send_message(message))
+    return {"ok": True}
+
+
+@app.websocket("/ws/chat/{session_id}")
+async def ws_chat(websocket: WebSocket, session_id: str):
+    if session_id not in sessions:
+        await websocket.close(code=4004, reason="会话不存在")
+        return
+    session = sessions[session_id]
+    await websocket.accept()
+    init_data = {
+        "type": "init",
+        "history": session.history,
+        "messages": session.messages,
+        "status": session.status,
+        "round": session.round,
+        "token_usage": session.token_usage,
+        "mode": "chat",
+    }
+    try:
+        await websocket.send_json(init_data)
+    except Exception:
+        await websocket.close()
+        return
+    try:
+        while True:
+            try:
+                event = await asyncio.wait_for(session.get_events().get(), timeout=20)
+                ws_msg = {"type": event.type, "data": event.data}
+                await websocket.send_json(ws_msg)
+                if event.type in ("chat_turn_end", "error"):
+                    break
+            except asyncio.TimeoutError:
+                await websocket.send_json({"type": "ping"})
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
 
 
 @app.post("/api/upload")

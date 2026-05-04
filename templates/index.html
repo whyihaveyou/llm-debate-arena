@@ -129,15 +129,19 @@ body { background: #0a0e1a; }
 
 .token-bar { height: 4px; border-radius: 2px; transition: width 0.5s ease; }
 .stat-number { font-variant-numeric: tabular-nums; }
+.hidden { display: none !important; }
+.chat-bubble-user { background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.2); border-radius: 16px 16px 4px 16px; max-width: 80%; }
+.chat-bubble-model { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px 16px 16px 4px; max-width: 85%; }
+.chat-thinking { font-size: 11px; color: #64748b; border-left: 2px solid rgba(99,102,241,0.3); padding-left: 8px; margin-bottom: 8px; white-space: pre-wrap; }
 </style>
 </head>
 <body class="text-gray-100 min-h-screen">
 
 <!-- Auth Gate -->
-<div id="auth-gate" class="fixed inset-0 bg-[#0a0e1a] flex items-center justify-center z-50">
+<div id="auth-gate" class="fixed inset-0 bg-[#0a0e1a] flex items-center justify-center z-50" style="display:flex">
   <div class="glass rounded-2xl p-8 w-full max-w-sm shadow-2xl fade-slide-up">
-    <h1 class="text-2xl font-bold text-center mb-1 bg-gradient-to-r from-indigo-400 to-teal-400 bg-clip-text text-transparent">AI Debate Arena</h1>
-    <p class="text-gray-500 text-center text-sm mb-6">两个大模型的学术辩论场</p>
+    <h1 id="app-title" class="text-2xl font-bold text-center mb-1 bg-gradient-to-r from-indigo-400 to-teal-400 bg-clip-text text-transparent">AI Debate Arena</h1>
+    <p id="app-subtitle" class="text-gray-500 text-center text-sm mb-6">多模型辩论与对话平台</p>
     <div class="flex mb-6 bg-white/5 rounded-xl p-0.5">
       <button id="tab-login" onclick="switchAuthTab('login')" class="flex-1 py-2 text-sm font-medium rounded-lg tab-active">登录</button>
       <button id="tab-register" onclick="switchAuthTab('register')" class="flex-1 py-2 text-sm font-medium rounded-lg tab-inactive">注册</button>
@@ -147,21 +151,21 @@ body { background: #0a0e1a; }
       <input id="login-pass" type="password" placeholder="密码" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-4 transition"
         onkeydown="if(event.key==='Enter')doLogin()">
       <button onclick="doLogin()" class="w-full py-3 btn-primary text-white font-semibold rounded-xl">登录</button>
-      <p id="login-error" class="text-red-400 text-sm mt-2 text-center hidden"></p>
+      <p id="login-error" class="text-red-400 text-sm mt-2 text-center" style="display:none"></p>
     </div>
-    <div id="form-register" class="hidden">
+    <div id="form-register" style="display:none">
       <input id="reg-user" type="text" placeholder="用户名 (至少2字符)" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-3 transition">
       <input id="reg-pass" type="password" placeholder="密码 (至少4字符)" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-3 transition">
       <input id="reg-pass2" type="password" placeholder="确认密码" class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 mb-4 transition"
         onkeydown="if(event.key==='Enter')doRegister()">
       <button onclick="doRegister()" class="w-full py-3 btn-primary text-white font-semibold rounded-xl">注册</button>
-      <p id="reg-error" class="text-red-400 text-sm mt-2 text-center hidden"></p>
+      <p id="reg-error" class="text-red-400 text-sm mt-2 text-center" style="display:none"></p>
     </div>
   </div>
 </div>
 
 <!-- Main App -->
-<div id="app" class="hidden">
+<div id="app" style="display:none">
   <header class="sticky top-0 z-40 bg-[#0a0e1a]/80 backdrop-blur-xl border-b border-white/5">
     <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
       <div class="flex items-center gap-3">
@@ -177,6 +181,7 @@ body { background: #0a0e1a; }
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
         </button>
         <button onclick="openModelManager()" class="btn-ghost px-3 py-1.5 text-xs text-gray-400 rounded-lg" title="管理模型">模型</button>
+        <button id="lang-toggle" onclick="setLang(currentLang==='zh'?'en':'zh')" class="btn-ghost px-2 py-1.5 text-xs text-gray-400 rounded-lg font-medium">EN</button>
         <div class="flex items-center gap-2 ml-1">
           <span id="quota-badge" class="text-xs px-2 py-1 rounded-full bg-white/5 text-gray-500" title="本月共享模型配额"></span>
           <a id="admin-link" class="hidden btn-ghost px-2 py-1 text-xs text-amber-400 rounded-lg" href="/api/admin/stats" target="_blank" title="管理员统计">管理</a>
@@ -192,7 +197,7 @@ body { background: #0a0e1a; }
     <div class="max-w-6xl mx-auto px-4 pt-6 pb-8">
       <div class="glass rounded-2xl p-6 mb-6 fade-slide-up">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-semibold text-white">新建辩论</h2>
+          <h2 id="new-debate-title" class="font-semibold text-white">新建辩论</h2>
           <div class="flex items-center gap-2">
             <div id="form-health" class="flex items-center gap-2"></div>
             <button onclick="importConfig()" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded-lg" title="导入配置">导入</button>
@@ -201,31 +206,50 @@ body { background: #0a0e1a; }
         </div>
         <!-- Mode selector -->
         <div class="flex gap-2 mb-4">
-          <div id="mode-sequential" class="mode-btn active flex-1 py-2.5 px-4 rounded-xl border text-sm text-center" onclick="setMode('sequential')">
+          <div id="mode-chat" class="mode-btn active flex-1 py-2.5 px-3 rounded-xl border text-sm text-center" onclick="setMode('chat')">
+            <div class="font-medium">单聊</div>
+            <div class="text-[10px] mt-0.5 opacity-70">选择一个模型对话</div>
+          </div>
+          <div id="mode-sequential" class="mode-btn flex-1 py-2.5 px-3 rounded-xl border text-sm text-center" onclick="setMode('sequential')">
             <div class="font-medium">交替审查</div>
             <div class="text-[10px] mt-0.5 opacity-70">A回答 → B审查 → A审查...</div>
           </div>
-          <div id="mode-blind" class="mode-btn flex-1 py-2.5 px-4 rounded-xl border text-sm text-center" onclick="setMode('blind')">
+          <div id="mode-blind" class="mode-btn flex-1 py-2.5 px-3 rounded-xl border text-sm text-center" onclick="setMode('blind')">
             <div class="font-medium">独立辩论</div>
             <div class="text-[10px] mt-0.5 opacity-70">A和B同时作答，交换观点</div>
           </div>
-          <div id="mode-chain3" class="mode-btn flex-1 py-2.5 px-4 rounded-xl border text-sm text-center" onclick="setMode('chain3')">
+          <div id="mode-chain3" class="mode-btn flex-1 py-2.5 px-3 rounded-xl border text-sm text-center" onclick="setMode('chain3')">
             <div class="font-medium">三人辩论</div>
             <div class="text-[10px] mt-0.5 opacity-70">A→B→C→A 链式轮流</div>
           </div>
         </div>
+        <div id="no-model-tip" class="hidden mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 cursor-pointer hover:bg-amber-500/15 transition" onclick="openModelManager()">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span class="text-xs text-amber-300">还没有可用模型，点击此处添加你自己的 API Key</span>
+          </div>
+        </div>
+        <!-- Chat mode controls -->
+        <div id="chat-controls" class="mb-3">
+          <div class="flex-1 min-w-[200px]">
+            <label class="text-xs text-gray-500 mb-1 block">选择模型</label>
+            <select id="select-chat-model" class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500/50 transition"></select>
+          </div>
+        </div>
+        <!-- Debate mode controls -->
+        <div id="debate-controls" style="display:none">
         <div class="flex flex-wrap gap-3 mb-3">
           <div class="flex-1 min-w-[140px]">
-            <label class="text-xs text-gray-500 mb-1 block">模型 A</label>
+            <label id="label-a" class="text-xs text-gray-500 mb-1 block">模型 A</label>
             <select id="select-a" class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500/50 transition"></select>
           </div>
           <div class="flex items-end pb-3 text-gray-600 font-bold text-sm">VS</div>
           <div class="flex-1 min-w-[140px]">
-            <label class="text-xs text-gray-500 mb-1 block">模型 B</label>
+            <label id="label-b" class="text-xs text-gray-500 mb-1 block">模型 B</label>
             <select id="select-b" class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-indigo-500/50 transition"></select>
           </div>
           <div id="model-c-wrapper" class="flex-1 min-w-[140px] hidden">
-            <label class="text-xs text-gray-500 mb-1 block">模型 C</label>
+            <label id="label-c" class="text-xs text-gray-500 mb-1 block">模型 C</label>
             <select id="select-c" class="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white text-sm focus:outline-none focus:border-amber-500/50 transition"></select>
           </div>
         </div>
@@ -295,9 +319,10 @@ body { background: #0a0e1a; }
           <p class="text-xs text-gray-600">拖拽文件到此处，或 <span class="text-indigo-400">点击上传</span></p>
           <p class="text-[10px] text-gray-700 mt-1">支持 Markdown、代码文件、PDF</p>
         </div>
-        <input type="file" id="file-input" accept=".md,.txt,.py,.rs,.js,.ts,.go,.java,.c,.cpp,.pdf,.swift,.kt,.rb,.php,.sh,.sql,.r,.lua,.hs,.ml,.zig,.nim,.dart,.vue,.html,.css,.json,.yaml,.yml,.toml,.xml" class="hidden">
+        <input type="file" id="file-input" accept=".md,.txt,.py,.rs,.js,.ts,.go,.java,.c,.cpp,.pdf,.swift,.kt,.rb,.php,.sh,.sql,.r,.lua,.hs,.ml,.zig,.nim,.dart,.vue,.html,.css,.json,.yaml,.yml,.toml,.xml" style="display:none">
         <div id="uploaded-files" class="flex flex-wrap gap-2 mb-3 hidden"></div>
-        <button onclick="startDebate()" class="btn-primary px-6 py-2.5 text-white font-medium rounded-xl text-sm">开始辩论</button>
+        <button id="btn-start" onclick="startDebate()" class="btn-primary px-6 py-2.5 text-white font-medium rounded-xl text-sm">开始聊天</button>
+        </div><!-- end debate-controls -->
       </div>
 
       <!-- Token summary (lobby) -->
@@ -378,6 +403,36 @@ body { background: #0a0e1a; }
     </div>
   </div>
 
+  <!-- Chat View -->
+  <div id="chat-view" class="view-transition view-hidden" style="display:none">
+    <div class="max-w-3xl mx-auto px-4 pt-4 pb-2">
+      <div class="glass rounded-xl px-4 py-3 mb-4 flex items-center justify-between">
+        <span class="text-indigo-400 font-medium text-sm" id="chat-model-name"></span>
+        <div class="flex items-center gap-2">
+          <span id="chat-token-display" class="text-[10px] text-gray-600 stat-number"></span>
+          <button id="btn-chat-stop" onclick="stopDebate()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg" style="display:none">停止</button>
+          <button id="btn-chat-export" onclick="exportMarkdown()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg">导出</button>
+          <button id="btn-chat-export-pdf" onclick="exportPDF()" class="btn-ghost px-3 py-1.5 text-xs text-gray-300 rounded-lg">PDF</button>
+          <button onclick="deleteCurrentChat()" class="btn-danger px-3 py-1.5 text-xs text-red-400 rounded-lg">删除</button>
+        </div>
+      </div>
+    </div>
+    <div id="chat-messages" class="max-w-3xl mx-auto px-4 py-2 space-y-3 overflow-y-auto" style="max-height:calc(100vh - 260px); min-height:200px;"></div>
+    <div id="chat-file-chips" class="max-w-3xl mx-auto px-4 flex flex-wrap gap-1.5" style="display:none"></div>
+    <div class="max-w-3xl mx-auto px-4 py-3" style="position:sticky; bottom:0; background:rgba(10,14,26,0.92); backdrop-filter:blur(12px); border-top:1px solid rgba(255,255,255,0.05);">
+      <div class="flex gap-2 items-end">
+        <button onclick="document.getElementById('chat-file-input').click()" class="btn-ghost px-2.5 py-2.5 text-gray-400 hover:text-indigo-400 rounded-xl" title="上传文件">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+        </button>
+        <input type="file" id="chat-file-input" accept=".md,.txt,.py,.rs,.js,.ts,.go,.java,.c,.cpp,.pdf,.swift,.kt,.rb,.php,.sh,.sql,.r,.lua,.hs,.ml,.zig,.nim,.dart,.vue,.html,.css,.json,.yaml,.yml,.toml,.xml" style="display:none">
+        <textarea id="chat-input" rows="2" placeholder="输入消息... (Shift+Enter 换行)"
+          class="flex-1 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500/50 text-sm resize-none transition"
+          onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChatMessage();}"></textarea>
+        <button id="btn-chat-send" onclick="sendChatMessage()" class="btn-primary px-4 py-2.5 text-white font-medium rounded-xl text-sm">发送</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Compile Modal -->
   <div id="compile-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 hidden" onclick="if(event.target===this)closeCompileModal()">
     <div class="glass rounded-2xl p-6 w-full max-w-3xl max-h-[80vh] overflow-y-auto mx-4 fade-slide-up">
@@ -433,14 +488,17 @@ body { background: #0a0e1a; }
       <div class="mb-4">
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-xs text-gray-500 uppercase tracking-wider">我的模型</h3>
+          <button onclick="showAddModelForm()" class="text-xs text-indigo-400 hover:text-indigo-300 transition font-medium">+ 添加模型</button>
+        </div>
+        <p class="text-[11px] text-gray-600 mb-2">添加你自己的 API Key 即可使用，不受配额限制。支持 OpenAI 兼容格式的任意模型。</p>
           <button onclick="showAddModelForm()" class="text-xs text-indigo-400 hover:text-indigo-300 transition">+ 添加模型</button>
         </div>
         <div id="user-models-list" class="space-y-2"></div>
         <div id="add-model-form" class="hidden mt-3 glass rounded-xl p-4 space-y-3">
-          <input id="am-name" type="text" placeholder="模型名称" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
-          <input id="am-url" type="text" placeholder="Base URL" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
-          <input id="am-key" type="password" placeholder="API Key" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
-          <input id="am-model" type="text" placeholder="Model ID" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <input id="am-name" type="text" placeholder="显示名称，如：我的 DeepSeek" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <input id="am-url" type="text" placeholder="API 地址，如：https://api.deepseek.com/v1" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <input id="am-key" type="password" placeholder="你的 API Key" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
+          <input id="am-model" type="text" placeholder="模型 ID，如：deepseek-reasoner" class="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg text-white text-sm placeholder-gray-600 focus:outline-none focus:border-indigo-500/50">
           <div class="flex items-center gap-3">
             <label class="text-xs text-gray-500">认证方式</label>
             <select id="am-auth" class="px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-white text-xs">
@@ -460,6 +518,218 @@ body { background: #0a0e1a; }
 </div>
 
 <script>
+/* ===== i18n ===== */
+let currentLang = localStorage.getItem('debate_lang') || 'zh';
+const I18N = {
+zh: {
+  app_title: 'AI Debate Arena',
+  app_subtitle: '多模型辩论与对话平台',
+  login: '登录', register: '注册', logout: '退出',
+  username_ph: '用户名', password_ph: '密码',
+  reg_user_ph: '用户名 (至少2字符)', reg_pass_ph: '密码 (至少4字符)', reg_pass2_ph: '确认密码',
+  login_error: '用户名或密码错误', register_ok: '注册成功，请登录',
+  pw_mismatch: '两次密码不一致',
+  new_debate: '新建辩论',
+  chat: '单聊', chat_desc: '选择一个模型对话',
+  sequential: '交替审查', sequential_desc: 'A回答 → B审查 → A审查...',
+  blind: '独立辩论', blind_desc: 'A和B同时作答，交换观点',
+  chain3: '三人辩论', chain3_desc: 'A→B→C→A 链式轮流',
+  select_model: '选择模型',
+  model_a: '模型 A', model_b: '模型 B', model_c: '模型 C',
+  max_rounds: '最大轮数', disagreement_threshold: '分歧阈值',
+  advanced: '高级选项',
+  memory_masking: '记忆屏蔽', memory_masking_desc: '每轮用LLM摘要筛选历史，防止错误传播',
+  masking_model: '屏蔽模型',
+  diversity_retention: '多样性保留', diversity_retention_desc: '过滤与已有回复过于相似的新回复',
+  emb_need: '需要配置 Embedding API（OpenAI 兼容格式）',
+  topic_label: '讨论主题', topic_lib: '题库',
+  topic_ph: '输入数学/物理/代码问题...',
+  drop_hint: '拖拽文件到此处，或', drop_click: '点击上传',
+  drop_formats: '支持 Markdown、代码文件、PDF',
+  start_chat: '开始聊天', start_debate: '开始辩论',
+  send: '发送', stop: '停止', delete: '删除',
+  export_md: '导出', export_pdf: 'PDF',
+  compile: '整理推导', analyze: '说服力', score: '评分',
+  chat_input_ph: '输入消息... (Shift+Enter 换行)',
+  thinking: '思考中...', chat_status: '聊天',
+  no_models: '还没有可用模型，点击此处添加你自己的 API Key',
+  no_custom_models: '暂无自定义模型',
+  my_models_desc: '添加你自己的 API Key 即可使用，不受配额限制。支持 OpenAI 兼容格式的任意模型。',
+  model_name_ph: '显示名称，如：我的 DeepSeek',
+  model_url_ph: 'API 地址，如：https://api.deepseek.com/v1',
+  model_key_ph: '你的 API Key',
+  model_id_ph: '模型 ID，如：deepseek-reasoner',
+  auth_type: '认证方式',
+  save: '保存', cancel: '取消', close: '关闭',
+  manage_models: '模型管理',
+  built_in: '内置', my_models: '我的模型',
+  add_model: '+ 添加模型',
+  model_added: '模型已添加', add_failed: '添加失败',
+  delete_confirm: '确定删除？', delete_confirm_chat: '确定删除此对话？',
+  deleted: '已删除',
+  network_error: '网络错误',
+  chat_label: '单聊',
+  round_text: '轮', round_chat: '轮对话',
+  tokens: 'tokens',
+  return_lobby: '返回大厅',
+  debate_stats: '辩论统计',
+  no_records: '暂无辩论记录',
+  search_ph: '搜索辩论主题或内容',
+  token_overview: 'Token 消耗概览',
+  import_config: '导入', export_config: '导出',
+  config_imported: '配置已导入',
+  no_model_tip: '还没有可用模型，点击此处添加你自己的 API Key',
+  fill_all: '请填写所有字段',
+  quota_badge: '配额',
+  admin: '管理',
+  uploaded: '已上传', gen_pdf: '生成 PDF...',
+  result_distribution: '结果分布', mode_distribution: '模式分布',
+  clear_history: '清除历史', restart: '重新开始',
+  view_details: '查看详情',
+  three_way_consensus: '三方达成共识',
+  quota_reached: '本月共享模型使用次数已达上限',
+  ref_materials: '参考材料',
+  config_not_found: '配置已失效，请删除此会话并重新创建',
+  model_not_configured: '未配置 API Key',
+  model_running: '模型正在回复中',
+  msg_empty: '消息不能为空',
+  cant_select: '请选择模型',
+  models_same: '模型 A 和 B 不能相同',
+  need_c: '三人模式需要选择模型 C',
+  three_diff: '三个模型必须不同',
+  topic_required: '请输入讨论主题',
+  diversity_need: '多样性保留需要填写 Embedding API 地址和模型ID',
+},
+en: {
+  app_title: 'AI Debate Arena',
+  app_subtitle: 'Multi-Model Debate & Chat Platform',
+  login: 'Login', register: 'Register', logout: 'Logout',
+  username_ph: 'Username', password_ph: 'Password',
+  reg_user_ph: 'Username (min 2 chars)', reg_pass_ph: 'Password (min 4 chars)', reg_pass2_ph: 'Confirm password',
+  login_error: 'Invalid username or password', register_ok: 'Registered, please login',
+  pw_mismatch: 'Passwords do not match',
+  new_debate: 'New Debate',
+  chat: 'Chat', chat_desc: 'Chat with one model',
+  sequential: 'Review', sequential_desc: 'A answers → B reviews → A reviews...',
+  blind: 'Blind', blind_desc: 'A and B answer simultaneously',
+  chain3: '3-Way', chain3_desc: 'A→B→C→A chain debate',
+  select_model: 'Select Model',
+  model_a: 'Model A', model_b: 'Model B', model_c: 'Model C',
+  max_rounds: 'Max Rounds', disagreement_threshold: 'Threshold',
+  advanced: 'Advanced',
+  memory_masking: 'Memory Masking', memory_masking_desc: 'Filter history with LLM each round',
+  masking_model: 'Masking Model',
+  diversity_retention: 'Diversity', diversity_retention_desc: 'Filter overly similar responses',
+  emb_need: 'Requires Embedding API (OpenAI compatible)',
+  topic_label: 'Topic', topic_lib: 'Topics',
+  topic_ph: 'Enter a math / physics / coding question...',
+  drop_hint: 'Drop files here, or', drop_click: 'click to upload',
+  drop_formats: 'Supports Markdown, code, PDF',
+  start_chat: 'Start Chat', start_debate: 'Start Debate',
+  send: 'Send', stop: 'Stop', delete: 'Delete',
+  export_md: 'Export', export_pdf: 'PDF',
+  compile: 'Compile', analyze: 'Analyze', score: 'Score',
+  chat_input_ph: 'Type a message... (Shift+Enter for newline)',
+  thinking: 'Thinking...', chat_status: 'Chat',
+  no_models: 'No models available — click to add your API Key',
+  no_custom_models: 'No custom models',
+  my_models_desc: 'Add your own API Key. Supports any OpenAI-compatible model.',
+  model_name_ph: 'Name, e.g. My DeepSeek',
+  model_url_ph: 'API URL, e.g. https://api.deepseek.com/v1',
+  model_key_ph: 'Your API Key',
+  model_id_ph: 'Model ID, e.g. deepseek-reasoner',
+  auth_type: 'Auth Type',
+  save: 'Save', cancel: 'Cancel', close: 'Close',
+  manage_models: 'Models',
+  built_in: 'Built-in', my_models: 'My Models',
+  add_model: '+ Add Model',
+  model_added: 'Model added', add_failed: 'Failed to add',
+  delete_confirm: 'Delete?', delete_confirm_chat: 'Delete this chat?',
+  deleted: 'Deleted',
+  network_error: 'Network error',
+  chat_label: 'Chat',
+  round_text: 'rounds', round_chat: 'messages',
+  tokens: 'tokens',
+  return_lobby: 'Back',
+  debate_stats: 'Statistics',
+  no_records: 'No records',
+  search_ph: 'Search topics or content',
+  token_overview: 'Token Usage',
+  import_config: 'Import', export_config: 'Export',
+  config_imported: 'Config imported',
+  no_model_tip: 'No models available — click to add your API Key',
+  fill_all: 'Please fill all fields',
+  quota_badge: 'Quota',
+  admin: 'Admin',
+  uploaded: 'Uploaded', gen_pdf: 'Generating PDF...',
+  result_distribution: 'Results', mode_distribution: 'Modes',
+  clear_history: 'Clear', restart: 'Restart',
+  view_details: 'Details',
+  three_way_consensus: 'Three-way consensus',
+  quota_reached: 'Monthly shared model quota reached',
+  ref_materials: 'References',
+  config_not_found: 'Model config lost, please delete and recreate',
+  model_not_configured: 'No API Key configured',
+  model_running: 'Model is responding',
+  msg_empty: 'Message cannot be empty',
+  cant_select: 'Please select a model',
+  models_same: 'Model A and B must be different',
+  need_c: '3-Way mode requires Model C',
+  three_diff: 'All three models must be different',
+  topic_required: 'Please enter a topic',
+  diversity_need: 'Diversity retention requires Embedding API URL and model ID',
+},
+};
+
+function t(key) { return I18N[currentLang]?.[key] || I18N.zh[key] || key; }
+
+function setLang(lang) {
+  currentLang = lang;
+  localStorage.setItem('debate_lang', lang);
+  updateUIText();
+}
+
+function updateUIText() {
+  // Header
+  const el = (id) => document.getElementById(id);
+  if (el('app-title')) el('app-title').textContent = t('app_title');
+  if (el('app-subtitle')) el('app-subtitle').textContent = t('app_subtitle');
+  if (el('login-tab')) el('login-tab').textContent = t('login');
+  if (el('register-tab')) el('register-tab').textContent = t('register');
+  if (el('logout-link')) el('logout-link').textContent = t('logout');
+  // Auth form
+  if (el('login-user')) el('login-user').placeholder = t('username_ph');
+  if (el('login-pass')) el('login-pass').placeholder = t('password_ph');
+  if (el('reg-user')) el('reg-user').placeholder = t('reg_user_ph');
+  if (el('reg-pass')) el('reg-pass').placeholder = t('reg_pass_ph');
+  if (el('reg-pass2')) el('reg-pass2').placeholder = t('reg_pass2_ph');
+  // Mode buttons
+  if (el('mode-chat')) { el('mode-chat').querySelector('.font-medium').textContent = t('chat'); el('mode-chat').querySelector('.text-\\[10px\\]').textContent = t('chat_desc'); }
+  if (el('mode-sequential')) { el('mode-sequential').querySelector('.font-medium').textContent = t('sequential'); el('mode-sequential').querySelector('.text-\\[10px\\]').textContent = t('sequential_desc'); }
+  if (el('mode-blind')) { el('mode-blind').querySelector('.font-medium').textContent = t('blind'); el('mode-blind').querySelector('.text-\\[10px\\]').textContent = t('blind_desc'); }
+  if (el('mode-chain3')) { el('mode-chain3').querySelector('.font-medium').textContent = t('chain3'); el('mode-chain3').querySelector('.text-\\[10px\\]').textContent = t('chain3_desc'); }
+  // Labels
+  if (el('label-a')) el('label-a').textContent = t('model_a');
+  if (el('label-b')) el('label-b').textContent = t('model_b');
+  if (el('label-c')) el('label-c').textContent = t('model_c');
+  // Buttons
+  if (el('btn-start')) el('btn-start').textContent = currentMode === 'chat' ? t('start_chat') : t('start_debate');
+  if (el('btn-chat-send')) el('btn-chat-send').textContent = t('send');
+  if (el('btn-chat-stop')) el('btn-chat-stop').textContent = t('stop');
+  if (el('btn-chat-export')) el('btn-chat-export').textContent = t('export_md');
+  if (el('btn-chat-export-pdf')) el('btn-chat-export-pdf').textContent = t('export_pdf');
+  // Chat input
+  if (el('chat-input')) el('chat-input').placeholder = t('chat_input_ph');
+  if (el('topic-input')) el('topic-input').placeholder = t('topic_ph');
+  // Lobby
+  if (el('new-debate-title')) el('new-debate-title').textContent = t('new_debate');
+  if (el('search-input')) el('search-input').placeholder = t('search_ph');
+  // No model tip
+  if (el('no-model-tip')) el('no-model-tip').querySelector('span').textContent = t('no_model_tip');
+  // Language toggle
+  if (el('lang-toggle')) el('lang-toggle').textContent = currentLang === 'zh' ? 'EN' : '中文';
+}
+
 /* ===== Topic Library ===== */
 const TOPIC_LIBRARY = [
   {cat:'数学', topics:['证明素数有无穷多个','求积分 ∫₀^∞ e^(-x²) dx','黎曼猜想的对数密度版本','贝叶斯定理 vs 频率学派的争议','连续统假设是否独立于ZFC？','费马大定理的核心思路']},
@@ -713,7 +983,7 @@ async function autoScore() {
 /* ===== State ===== */
 let currentView = 'lobby';
 let currentDebateId = null;
-let currentMode = 'sequential';
+let currentMode = 'chat';
 let debates = {};
 let modelHealthData = {};
 let globalModels = {};
@@ -731,16 +1001,16 @@ let wsConnection = null;  // WebSocket for debate streaming
 
 /* ===== Auth ===== */
 function switchAuthTab(tab) {
-  document.getElementById('form-login').classList.toggle('hidden', tab !== 'login');
-  document.getElementById('form-register').classList.toggle('hidden', tab !== 'register');
+  document.getElementById('form-login').style.display = tab === 'login' ? '' : 'none';
+  document.getElementById('form-register').style.display = tab === 'register' ? '' : 'none';
   document.getElementById('tab-login').className = `flex-1 py-2 text-sm font-medium rounded-lg ${tab === 'login' ? 'tab-active' : 'tab-inactive'}`;
   document.getElementById('tab-register').className = `flex-1 py-2 text-sm font-medium rounded-lg ${tab === 'register' ? 'tab-active' : 'tab-inactive'}`;
 }
 
 function showAuthError(id, msg) {
   const el = document.getElementById(id);
-  el.textContent = msg; el.classList.remove('hidden');
-  setTimeout(() => el.classList.add('hidden'), 3000);
+  el.textContent = msg; el.style.display = '';
+  setTimeout(() => el.style.display = 'none', 3000);
 }
 
 async function doLogin() {
@@ -776,19 +1046,20 @@ async function doLogout() {
   try { await fetch('/api/auth/logout', {method:'POST', headers:{'Authorization': `Bearer ${authToken}`}}); } catch(e) {}
   authToken = ''; currentUser = null;
   localStorage.removeItem('debate_token');
-  document.getElementById('app').classList.add('hidden');
-  document.getElementById('auth-gate').classList.remove('hidden');
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('auth-gate').style.display = '';
 }
 
 function enterApp() {
-  document.getElementById('auth-gate').classList.add('hidden');
-  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('auth-gate').style.display = 'none';
+  document.getElementById('app').style.display = '';
   document.getElementById('username-display').textContent = currentUser?.username || '';
-  if (currentUser?.is_admin) document.getElementById('admin-link')?.classList.remove('hidden');
+  if (currentUser?.is_admin) document.getElementById('admin-link')?.style.display = '';
   loadModels();
   loadQuotaInfo();
   startLobbyPoll();
   initDropZone();
+  updateUIText();
 }
 
 async function checkAuth() {
@@ -891,6 +1162,27 @@ async function loadModels() {
   }
 
   renderHealthIndicators();
+
+  // Show guidance if no usable models
+  const selA = document.getElementById('select-a');
+  const hasUsable = Array.from(selA.options).some(o => !o.disabled);
+  document.getElementById('no-model-tip').classList.toggle('hidden', hasUsable);
+
+  // Populate chat model selector (only usable models)
+  const selChat = document.getElementById('select-chat-model');
+  if (selChat) {
+    selChat.innerHTML = '';
+    let chatFirst = true;
+    for (const [id, m] of Object.entries(cfgData.models)) {
+      if (!globalModels[id]?.has_key) continue;
+      selChat.add(new Option(m.name, `global:${id}`, false, chatFirst));
+      if (chatFirst) chatFirst = false;
+    }
+    for (const [id, m] of userEntries) {
+      selChat.add(new Option(m.name, id, false, chatFirst));
+      if (chatFirst) chatFirst = false;
+    }
+  }
 }
 
 function toggleAdvanced() {
@@ -916,10 +1208,22 @@ function renderHealthIndicators() {
 /* ===== Mode ===== */
 function setMode(mode) {
   currentMode = mode;
+  document.getElementById('mode-chat').classList.toggle('active', mode === 'chat');
   document.getElementById('mode-sequential').classList.toggle('active', mode === 'sequential');
   document.getElementById('mode-blind').classList.toggle('active', mode === 'blind');
   document.getElementById('mode-chain3').classList.toggle('active', mode === 'chain3');
-  document.getElementById('model-c-wrapper').classList.toggle('hidden', mode !== 'chain3');
+  const isChat = mode === 'chat';
+  document.getElementById('chat-controls').style.display = isChat ? '' : 'none';
+  document.getElementById('debate-controls').style.display = isChat ? 'none' : '';
+  document.getElementById('model-c-wrapper').style.display = mode === 'chain3' ? '' : 'none';
+  document.getElementById('btn-start').textContent = isChat ? '开始聊天' : '开始辩论';
+  // Also toggle topic/file areas visibility for chat
+  const topicArea = document.getElementById('topic-input')?.closest('.mb-3');
+  const dropZone = document.getElementById('drop-zone')?.closest('.mb-3');
+  const fileChips = document.getElementById('uploaded-files');
+  if (topicArea) topicArea.style.display = isChat ? 'none' : '';
+  if (dropZone) dropZone.style.display = isChat ? 'none' : '';
+  if (fileChips) fileChips.style.display = isChat ? 'none' : '';
 }
 
 /* ===== Model Manager ===== */
@@ -953,19 +1257,46 @@ function renderUserModels() {
   if (!entries.length) { el.innerHTML = '<p class="text-xs text-gray-600 py-2">暂无自定义模型</p>'; return; }
   el.innerHTML = entries.map(([id, m]) => `
     <div class="flex items-center justify-between py-2 px-3 bg-white/3 rounded-lg">
-      <div>
-        <div class="text-sm text-gray-300">${escHtml(m.name)}</div>
-        <div class="text-[10px] text-gray-600">${escHtml(m.model)} · ${escHtml(m.base_url)}</div>
+      <div class="flex items-center gap-2">
+        <span class="health-dot" id="health-user-${id.split(':')[1]}"></span>
+        <div>
+          <div class="text-sm text-gray-300">${escHtml(m.name)}</div>
+          <div class="text-[10px] text-gray-600">${escHtml(m.model)} · ${escHtml(m.base_url)}</div>
+        </div>
       </div>
       <button onclick="removeModel('${id}')" class="text-xs text-red-400/70 hover:text-red-400">删除</button>
     </div>
   `).join('');
+  checkUserModelHealth();
 }
 
 function showAddModelForm() { document.getElementById('add-model-form').classList.remove('hidden'); }
 function hideAddModelForm() {
   document.getElementById('add-model-form').classList.add('hidden');
   ['am-name','am-url','am-key','am-model'].forEach(id => document.getElementById(id).value = '');
+}
+
+let _userHealthTimer = null;
+function checkUserModelHealth() {
+  if (_userHealthTimer) clearTimeout(_userHealthTimer);
+  _userHealthTimer = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/user/models/health', {headers: authHeaders()});
+      if (!res.ok) return;
+      const data = await res.json();
+      for (const [uid, health] of Object.entries(data)) {
+        const dot = document.getElementById('health-user-' + uid);
+        if (!dot) continue;
+        if (health.ok) {
+          dot.className = 'health-dot health-ok';
+          dot.title = '正常';
+        } else {
+          dot.className = 'health-dot health-err';
+          dot.title = health.error || '连接失败';
+        }
+      }
+    } catch(e) {}
+  }, 500);
 }
 
 async function addModel() {
@@ -982,6 +1313,9 @@ async function addModel() {
     await loadModels();
     renderUserModels();
     showToast('模型已添加');
+    // Auto-close modal if user now has usable models
+    const selA = document.getElementById('select-a');
+    if (Array.from(selA.options).some(o => !o.disabled)) closeModelManager();
   } catch(e) { showToast('添加失败'); }
 }
 
@@ -1117,7 +1451,7 @@ function buildCardHtml(d, i) {
   const progress = d.max_rounds ? Math.round(d.round/d.max_rounds*100) : 0;
   const shortTopic = d.topic.length > 40 ? d.topic.slice(0,40)+'...' : d.topic;
   const timeStr = d.created_at ? new Date(d.created_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}) : '';
-  const modeLabels = {sequential:'', blind:'独立辩论', chain3:'三人辩论'};
+  const modeLabels = {sequential:'', blind:'独立辩论', chain3:'三人辩论', chat:''};
   const modeLabel = modeLabels[d.mode] || '';
   const hasC = d.mode === 'chain3' && d.name_c;
   const tokenTotal = d.token_usage && typeof d.token_usage._total === 'number' ? d.token_usage._total : 0;
@@ -1129,18 +1463,21 @@ function buildCardHtml(d, i) {
       </div>
       <div class="lobby-status-detail text-[10px] text-indigo-400/70 mb-1 ${isActive?'':'hidden'}">${escHtml(isActive&&d.status_detail?d.status_detail:'')}</div>
       <div class="flex items-center gap-2 text-xs text-gray-500 mb-3">
-        <span class="text-indigo-400/70">${escHtml(d.name_a)}</span><span>vs</span><span class="text-teal-400/70">${escHtml(d.name_b)}</span>
-        ${hasC ? `<span>vs</span><span class="text-amber-400/70">${escHtml(d.name_c)}</span>` : ''}
-        ${modeLabel ? `<span class="text-[10px] px-1.5 py-0.5 bg-white/5 rounded text-gray-500">${modeLabel}</span>` : ''}
+        ${d.mode==='chat'
+          ? `<span class="text-indigo-400/70">${escHtml(d.name_a)}</span><span class="text-[10px] px-1.5 py-0.5 bg-indigo-500/15 text-indigo-400 rounded">单聊</span>`
+          : `<span class="text-indigo-400/70">${escHtml(d.name_a)}</span><span>vs</span><span class="text-teal-400/70">${escHtml(d.name_b)}</span>
+             ${hasC ? `<span>vs</span><span class="text-amber-400/70">${escHtml(d.name_c)}</span>` : ''}
+             ${modeLabel ? `<span class="text-[10px] px-1.5 py-0.5 bg-white/5 rounded text-gray-500">${modeLabel}</span>` : ''}`
+        }
         <span class="ml-auto">${timeStr}</span>
       </div>
       ${isActive ? `
         <div class="progress-bar mb-2"><div class="progress-fill bg-gradient-to-r from-indigo-500 to-teal-500" style="width:${progress}%"></div></div>
-        <div class="lobby-round-info text-[10px] text-gray-600">第 ${d.round}/${d.max_rounds} 轮</div>
+        <div class="lobby-round-info text-[10px] text-gray-600">${d.mode==='chat'?'思考中...':`第 ${d.round}/${d.max_rounds} 轮`}</div>
       ` : `
-        <div class="lobby-round-info text-[10px] text-gray-600 mb-2">共 ${d.round} 轮${tokenTotal ? ` · ${formatNum(tokenTotal)} tokens` : ''}</div>
+        <div class="lobby-round-info text-[10px] text-gray-600 mb-2">${d.mode==='chat'?`${d.round} 轮对话${tokenTotal ? ` · ${formatNum(tokenTotal)} tokens` : ''}`:`共 ${d.round} 轮${tokenTotal ? ` · ${formatNum(tokenTotal)} tokens` : ''}`}</div>
         <div class="flex gap-2" onclick="event.stopPropagation()">
-          ${d.status!=='running'&&d.status!=='error'?`<button onclick="event.stopPropagation();compileFromLobby('${d.id}')" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded">整理推导</button><button onclick="event.stopPropagation();exportFromLobby('${d.id}')" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded">导出</button>`:''}
+          ${d.status!=='running'&&d.status!=='error'&&d.mode!=='chat'?`<button onclick="event.stopPropagation();compileFromLobby('${d.id}')" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded">整理推导</button><button onclick="event.stopPropagation();exportFromLobby('${d.id}')" class="btn-ghost px-2 py-1 text-[10px] text-gray-400 rounded">导出</button>`:''}
           <button onclick="event.stopPropagation();deleteDebateById('${d.id}')" class="btn-danger px-2 py-1 text-[10px] text-red-400/70 rounded hover:text-red-400">删除</button>
         </div>
       `}
@@ -1155,9 +1492,13 @@ function getStatusConfig(s) {
 /* ===== View Switching ===== */
 function showLobby() {
   currentView = 'lobby';
+  closeWS();
   document.getElementById('lobby-view').className = 'view-transition view-visible';
+  document.getElementById('lobby-view').style.display = '';
   document.getElementById('debate-view').className = 'view-transition view-hidden';
-  document.getElementById('back-btn').classList.add('hidden');
+  document.getElementById('debate-view').style.display = 'none';
+  document.getElementById('chat-view').style.display = 'none';
+  document.getElementById('back-btn').style.display = 'none';
   document.getElementById('status-badge').textContent = '就绪';
   document.getElementById('status-badge').className = 'text-xs px-3 py-1.5 rounded-full bg-white/5 text-gray-400';
   window.scrollTo(0, 0);
@@ -1232,6 +1573,8 @@ function connectWS(id) {
 }
 
 function openDebate(id) {
+  const d = debates[id]; if (!d) return;
+  if (d.mode === 'chat') return openChatView(id);
   currentDebateId = id; currentView = 'debate'; lastRenderedRound = 0;
   const d = debates[id]; if (!d) return;
   document.getElementById('debate-name-a').textContent = d.name_a;
@@ -1468,8 +1811,307 @@ function setupScrollSpy() {
   conv.querySelectorAll('.msg-card').forEach(card => observer.observe(card));
 }
 
+/* ===== Chat ===== */
+let currentChatId = null;
+let chatUploadedFiles = [];
+
+async function startChat() {
+  const modelId = document.getElementById('select-chat-model').value;
+  if (!modelId) return alert(t('cant_select'));
+  try {
+    const res = await fetch('/api/chat/start', {method:'POST', headers:authHeaders(), body:JSON.stringify({model:modelId, lang:currentLang})});
+    const data = await res.json();
+    if (!res.ok) { alert(data.detail || '启动失败'); return; }
+    await pollDebates();
+    loadQuotaInfo();
+    openChatView(data.session_id);
+  } catch(e) { alert('网络错误'); }
+}
+
+function openChatView(id) {
+  currentChatId = id;
+  currentDebateId = id;
+  currentView = 'chat';
+  const d = debates[id];
+  if (!d) return;
+  document.getElementById('chat-model-name').textContent = d.name_a || 'Chat';
+  document.getElementById('lobby-view').style.display = 'none';
+  document.getElementById('debate-view').style.display = 'none';
+  document.getElementById('chat-view').style.display = '';
+  document.getElementById('back-btn').style.display = '';
+  setStatus('聊天', 'bg-indigo-500/20 text-indigo-400');
+  const isRunning = d.status === 'running';
+  document.getElementById('btn-chat-stop').style.display = isRunning ? '' : 'none';
+  document.getElementById('btn-chat-export').style.display = isRunning ? 'none' : '';
+  document.getElementById('btn-chat-export-pdf').style.display = isRunning ? 'none' : '';
+  // Fetch full history from server
+  loadChatHistoryFromServer(id);
+  if (isRunning) connectChatWS(id);
+  closeWS();
+}
+
+async function loadChatHistoryFromServer(id) {
+  const container = document.getElementById('chat-messages');
+  container.innerHTML = '';
+  try {
+    const res = await fetch(`/api/debate/history/${id}`, {headers: authHeaders()});
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.history) {
+      data.history.forEach(entry => {
+        if (entry.model === 'User') {
+          appendChatBubble('user', entry.content);
+        } else {
+          appendChatBubble('model', entry.content, entry.model);
+        }
+      });
+    }
+    if (data.token_usage) {
+      const total = typeof data.token_usage._total === 'number' ? data.token_usage._total : 0;
+      document.getElementById('chat-token-display').textContent = total ? formatNum(total) + ' tokens' : '';
+    }
+  } catch(e) {}
+  container.scrollTop = container.scrollHeight;
+}
+
+function loadChatHistory(id) {
+  const container = document.getElementById('chat-messages');
+  container.innerHTML = '';
+  const d = debates[id];
+  if (!d || !d.history) return;
+  d.history.forEach(entry => {
+    if (entry.model === 'User') {
+      appendChatBubble('user', entry.content);
+    } else {
+      appendChatBubble('model', entry.content, entry.model);
+    }
+  });
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendChatBubble(role, content, modelName) {
+  const container = document.getElementById('chat-messages');
+  const wrapper = document.createElement('div');
+  wrapper.className = `fade-slide-up ${role === 'user' ? 'flex justify-end' : ''}`;
+  const bubble = document.createElement('div');
+  bubble.className = role === 'user' ? 'chat-bubble-user p-3' : 'chat-bubble-model p-4';
+  if (role === 'user') {
+    bubble.innerHTML = `<div class="msg-text prose prose-invert max-w-none text-sm leading-relaxed"></div>`;
+  } else {
+    bubble.innerHTML = `<div class="msg-text prose prose-invert max-w-none text-sm leading-relaxed"></div>`;
+    if (modelName) {
+      const label = document.createElement('div');
+      label.className = 'text-indigo-400 font-medium text-xs mb-2';
+      label.textContent = modelName;
+      bubble.insertBefore(label, bubble.firstChild);
+    }
+  }
+  wrapper.appendChild(bubble);
+  container.appendChild(wrapper);
+  renderContent(bubble.querySelector('.msg-text'), content || '');
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendChatMessage() {
+  if (!currentChatId) return;
+  const input = document.getElementById('chat-input');
+  let message = input.value.trim();
+  if (!message && !chatUploadedFiles.length) return;
+  if (chatUploadedFiles.length) {
+    message += '\n\n参考材料：\n\n' + chatUploadedFiles.map(f => `---\n文件: ${f.filename}\n${f.content}\n---`).join('\n\n');
+  }
+  input.value = '';
+  chatUploadedFiles = [];
+  renderChatFileChips();
+  if (!message.trim()) return;
+  message = message.trim();
+
+  // Show user bubble immediately
+  appendChatBubble('user', message);
+
+  // Show thinking indicator
+  const container = document.getElementById('chat-messages');
+  const thinkingEl = document.createElement('div');
+  thinkingEl.id = 'chat-thinking';
+  thinkingEl.className = 'flex justify-start fade-slide-up';
+  thinkingEl.innerHTML = '<div class="chat-bubble-model p-3"><span class="text-xs text-gray-500">思考中...</span></div>';
+  container.appendChild(thinkingEl);
+  container.scrollTop = container.scrollHeight;
+
+  try {
+    const res = await fetch(`/api/chat/send/${currentChatId}`, {method:'POST', headers:authHeaders(), body:JSON.stringify({message})});
+    if (!res.ok) {
+      const data = await res.json();
+      showToast(data.detail || '发送失败');
+      thinkingEl.remove();
+    } else {
+      document.getElementById('btn-chat-stop').style.display = '';
+      document.getElementById('btn-chat-export').style.display = 'none';
+      document.getElementById('btn-chat-export-pdf').style.display = 'none';
+      connectChatWS(currentChatId);
+    }
+  } catch(e) {
+    showToast('网络错误');
+    thinkingEl.remove();
+  }
+}
+
+function connectChatWS(id) {
+  if (wsConnection) { try { wsConnection.close(); } catch(e){} wsConnection = null; }
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  wsConnection = new WebSocket(`${proto}//${location.host}/ws/chat/${id}`);
+  const container = document.getElementById('chat-messages');
+
+  wsConnection.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'ping') return;
+
+      if (msg.type === 'init') {
+        if (msg.token_usage && debates[id]) debates[id].token_usage = msg.token_usage;
+        return;
+      }
+
+      const data = msg.data || {};
+      const thinkingEl = document.getElementById('chat-thinking');
+
+      if (msg.type === 'user_message') return;
+
+      if (msg.type === 'content_start' && data.model && data.model !== 'User') {
+        if (thinkingEl) thinkingEl.remove();
+        const bubbleWrapper = document.createElement('div');
+        bubbleWrapper.id = 'chat-streaming-bubble';
+        bubbleWrapper.className = 'flex justify-start fade-slide-up';
+        const d = debates[id];
+        const modelName = d?.name_a || data.model;
+        bubbleWrapper.innerHTML = `<div class="chat-bubble-model p-4"><div class="text-indigo-400 font-medium text-xs mb-2">${escHtml(modelName)}</div><div class="msg-text prose prose-invert max-w-none text-sm leading-relaxed"></div></div>`;
+        container.appendChild(bubbleWrapper);
+        return;
+      }
+
+      if (msg.type === 'token') {
+        const bubble = document.getElementById('chat-streaming-bubble');
+        if (bubble) {
+          const textEl = bubble.querySelector('.msg-text');
+          if (textEl) {
+            textEl.dataset.raw = (textEl.dataset.raw || '') + data.content;
+            clearTimeout(window._chatRenderTimer);
+            window._chatRenderTimer = setTimeout(() => {
+              renderContent(textEl, textEl.dataset.raw || '');
+              container.scrollTop = container.scrollHeight;
+            }, 80);
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'thinking') {
+        const bubble = document.getElementById('chat-streaming-bubble');
+        if (bubble) {
+          let thinkEl = bubble.querySelector('.chat-thinking');
+          if (!thinkEl) {
+            const content = bubble.querySelector('.msg-text');
+            thinkEl = document.createElement('div');
+            thinkEl.className = 'chat-thinking';
+            content.parentElement.insertBefore(thinkEl, content);
+          }
+          thinkEl.textContent += data.content;
+        }
+        return;
+      }
+
+      if (msg.type === 'content_end' || msg.type === 'chat_turn_end') {
+        const bubble = document.getElementById('chat-streaming-bubble');
+        if (bubble) {
+          bubble.removeAttribute('id');
+          const textEl = bubble.querySelector('.msg-text');
+          clearTimeout(window._chatRenderTimer);
+          renderContent(textEl, textEl.dataset.raw || '');
+        }
+        if (thinkingEl) thinkingEl.remove();
+        container.scrollTop = container.scrollHeight;
+        // Update button states
+        document.getElementById('btn-chat-stop').style.display = 'none';
+        document.getElementById('btn-chat-export').style.display = '';
+        document.getElementById('btn-chat-export-pdf').style.display = '';
+        // Refresh lobby data
+        pollDebates();
+        return;
+      }
+
+      if (msg.type === 'error') {
+        if (thinkingEl) thinkingEl.remove();
+        const streamBubble = document.getElementById('chat-streaming-bubble');
+        if (streamBubble) streamBubble.remove();
+        showToast(data.message || '模型回复出错');
+        return;
+      }
+
+      if (msg.type === 'token_usage') {
+        if (debates[id]) {
+          debates[id].token_usage = data;
+          const total = typeof data._total === 'number' ? data._total : 0;
+          document.getElementById('chat-token-display').textContent = total ? formatNum(total) + ' tokens' : '';
+        }
+        return;
+      }
+    } catch(e) {}
+  };
+
+  wsConnection.onclose = () => {
+    wsConnection = null;
+    // If we were streaming, poll to get final state
+    pollDebates();
+  };
+  wsConnection.onerror = () => { wsConnection = null; };
+}
+
+async function deleteCurrentChat() {
+  if (!currentChatId || !confirm('确定删除此对话？')) return;
+  await fetch(`/api/debate/${currentChatId}`, {method:'DELETE', headers:authHeaders()});
+  delete debates[currentChatId];
+  currentChatId = null;
+  currentDebateId = null;
+  if (wsConnection) { try{wsConnection.close();}catch(e){} wsConnection = null; }
+  showLobby();
+  renderLobby();
+  showToast('已删除');
+}
+
+// Chat file upload
+document.getElementById('chat-file-input')?.addEventListener('change', async function(e) {
+  for (const file of e.target.files) {
+    if (chatUploadedFiles.some(f => f.filename === file.name)) continue;
+    try {
+      if (file.name.endsWith('.pdf')) {
+        const text = await extractPdfText(file);
+        if (!text.trim()) continue;
+        chatUploadedFiles.push({filename: file.name + ' (PDF)', content: text});
+      } else {
+        chatUploadedFiles.push({filename: file.name, content: await file.text()});
+      }
+    } catch(err) { showToast('文件读取失败'); }
+  }
+  e.target.value = '';
+  renderChatFileChips();
+});
+
+function removeChatFile(name) {
+  chatUploadedFiles = chatUploadedFiles.filter(f => f.filename !== name);
+  renderChatFileChips();
+}
+
+function renderChatFileChips() {
+  const el = document.getElementById('chat-file-chips');
+  if (!el) return;
+  if (!chatUploadedFiles.length) { el.innerHTML = ''; el.style.display = 'none'; return; }
+  el.style.display = '';
+  el.innerHTML = chatUploadedFiles.map(f => `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] bg-white/5 text-gray-400">${escHtml(f.filename)}<button onclick="removeChatFile('${escHtml(f.filename)}')" class="ml-1 text-gray-600 hover:text-red-400">&times;</button></span>`).join('');
+}
+
 /* ===== Debate Control ===== */
 async function startDebate() {
+  if (currentMode === 'chat') return startChat();
   const topic = document.getElementById('topic-input').value.trim();
   const modelA = document.getElementById('select-a').value;
   const modelB = document.getElementById('select-b').value;
@@ -1486,7 +2128,7 @@ async function startDebate() {
   if (uploadedFiles.length) { fullTopic += '\n\n参考材料：\n\n' + uploadedFiles.map(f => `---\n文件: ${f.filename}\n${f.content}\n---`).join('\n\n'); }
   const body = {
     topic: fullTopic, model_a: modelA, model_b: modelB,
-    max_rounds: maxRounds, disagreement_threshold: threshold, mode: currentMode,
+    max_rounds: maxRounds, disagreement_threshold: threshold, mode: currentMode, lang: currentLang,
   };
   if (currentMode === 'chain3') body.model_c = modelC;
   if (document.getElementById('toggle-masking').checked) {
