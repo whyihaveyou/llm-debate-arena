@@ -599,6 +599,10 @@ zh: {
   three_diff: '三个模型必须不同',
   topic_required: '请输入讨论主题',
   diversity_need: '多样性保留需要填写 Embedding API 地址和模型ID',
+  stats_total: '总辩论数', stats_consensus: '达成共识', stats_avg_rounds: '平均轮数',
+  status_running: '进行中', status_consensus: '达成共识', status_disagreement: '存在分歧',
+  status_max_rounds: '达到上限', status_stopped: '已停止', status_error: '出错', status_idle: '等待中',
+  generating: '生成中...', filtered: '已过滤', blind_round: '轮',
 },
 en: {
   app_title: 'AI Debate Arena',
@@ -678,6 +682,10 @@ en: {
   three_diff: 'All three models must be different',
   topic_required: 'Please enter a topic',
   diversity_need: 'Diversity retention requires Embedding API URL and model ID',
+  stats_total: 'Total debates', stats_consensus: 'Consensus', stats_avg_rounds: 'Avg rounds',
+  status_running: 'Running', status_consensus: 'Consensus', status_disagreement: 'Disagreement',
+  status_max_rounds: 'Max rounds', status_stopped: 'Stopped', status_error: 'Error', status_idle: 'Idle',
+  generating: 'Generating...', filtered: 'Filtered', blind_round: 'Round',
 },
 };
 
@@ -848,34 +856,34 @@ function renderStats() {
     <div class="grid grid-cols-3 gap-3 mb-4">
       <div class="bg-white/5 rounded-xl p-3 text-center">
         <div class="text-2xl font-bold text-white stat-number">${total}</div>
-        <div class="text-[10px] text-gray-500 mt-1">总辩论数</div>
+        <div class="text-[10px] text-gray-500 mt-1">${t('stats_total')}</div>
       </div>
       <div class="bg-white/5 rounded-xl p-3 text-center">
         <div class="text-2xl font-bold text-emerald-400 stat-number">${consensus}</div>
-        <div class="text-[10px] text-gray-500 mt-1">达成共识</div>
+        <div class="text-[10px] text-gray-500 mt-1">${t('stats_consensus')}</div>
       </div>
       <div class="bg-white/5 rounded-xl p-3 text-center">
         <div class="text-2xl font-bold text-amber-400 stat-number">${avgRounds}</div>
-        <div class="text-[10px] text-gray-500 mt-1">平均轮数</div>
+        <div class="text-[10px] text-gray-500 mt-1">${t('stats_avg_rounds')}</div>
       </div>
     </div>
     <div class="space-y-3">
       <div class="bg-white/5 rounded-xl p-3">
-        <div class="text-xs text-gray-400 mb-2">结果分布</div>
+        <div class="text-xs text-gray-400 mb-2">${t('result_distribution')}</div>
         <div class="flex gap-1 h-4 rounded-full overflow-hidden">
-          ${consensus ? `<div class="bg-emerald-500" style="width:${(consensus/finished.length*100)||0}%" title="共识 ${consensus}"></div>` : ''}
-          ${disagreement ? `<div class="bg-amber-500" style="width:${(disagreement/finished.length*100)||0}%" title="分歧 ${disagreement}"></div>` : ''}
-          ${maxRoundsHit ? `<div class="bg-orange-500" style="width:${(maxRoundsHit/finished.length*100)||0}%" title="达上限 ${maxRoundsHit}"></div>` : ''}
-          ${running ? `<div class="bg-indigo-500" style="width:${(running/total*100)||0}%" title="进行中 ${running}"></div>` : ''}
+          ${consensus ? `<div class="bg-emerald-500" style="width:${(consensus/finished.length*100)||0}%" title="${t('status_consensus')} ${consensus}"></div>` : ''}
+          ${disagreement ? `<div class="bg-amber-500" style="width:${(disagreement/finished.length*100)||0}%" title="${t('status_disagreement')} ${disagreement}"></div>` : ''}
+          ${maxRoundsHit ? `<div class="bg-orange-500" style="width:${(maxRoundsHit/finished.length*100)||0}%" title="${t('status_max_rounds')} ${maxRoundsHit}"></div>` : ''}
+          ${running ? `<div class="bg-indigo-500" style="width:${(running/total*100)||0}%" title="${t('status_running')} ${running}"></div>` : ''}
         </div>
         <div class="flex gap-3 mt-2 text-[10px] text-gray-500">
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>共识 ${consensus}</span>
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>分歧 ${disagreement}</span>
-          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>达上限 ${maxRoundsHit}</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>${t('status_consensus')} ${consensus}</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500 inline-block"></span>${t('status_disagreement')} ${disagreement}</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-orange-500 inline-block"></span>${t('status_max_rounds')} ${maxRoundsHit}</span>
         </div>
       </div>
       <div class="bg-white/5 rounded-xl p-3">
-        <div class="text-xs text-gray-400 mb-2">模式分布</div>
+        <div class="text-xs text-gray-400 mb-2">${t('mode_distribution')}</div>
         <div class="flex gap-2">
           ${Object.entries(modeCounts).map(([m,c]) => `<div class="flex-1 text-center"><div class="text-lg font-bold text-white stat-number">${c}</div><div class="text-[10px] text-gray-500">${{sequential:'交替',blind:'独立',chain3:'三人'}[m]||m}</div></div>`).join('')}
         </div>
@@ -1164,7 +1172,6 @@ async function loadModels() {
   renderHealthIndicators();
 
   // Show guidance if no usable models
-  const selA = document.getElementById('select-a');
   const hasUsable = Array.from(selA.options).some(o => !o.disabled);
   document.getElementById('no-model-tip').classList.toggle('hidden', hasUsable);
 
@@ -1485,7 +1492,7 @@ function buildCardHtml(d, i) {
 }
 
 function getStatusConfig(s) {
-  const m = {running:{label:'进行中',cls:'bg-indigo-500/20 text-indigo-400'},consensus:{label:'达成共识',cls:'bg-emerald-500/20 text-emerald-400'},disagreement:{label:'存在分歧',cls:'bg-amber-500/20 text-amber-400'},max_rounds:{label:'达到上限',cls:'bg-orange-500/20 text-orange-400'},stopped:{label:'已停止',cls:'bg-gray-500/20 text-gray-400'},error:{label:'出错',cls:'bg-red-500/20 text-red-400'},idle:{label:'等待中',cls:'bg-gray-500/20 text-gray-400'}};
+  const m = {running:{label:t('status_running'),cls:'bg-indigo-500/20 text-indigo-400'},consensus:{label:t('status_consensus'),cls:'bg-emerald-500/20 text-emerald-400'},disagreement:{label:t('status_disagreement'),cls:'bg-amber-500/20 text-amber-400'},max_rounds:{label:t('status_max_rounds'),cls:'bg-orange-500/20 text-orange-400'},stopped:{label:t('status_stopped'),cls:'bg-gray-500/20 text-gray-400'},error:{label:t('status_error'),cls:'bg-red-500/20 text-red-400'},idle:{label:t('status_idle'),cls:'bg-gray-500/20 text-gray-400'}};
   return m[s] || {label:s,cls:'bg-gray-500/20 text-gray-400'};
 }
 
@@ -1516,13 +1523,48 @@ function closeWS() { if (wsConnection) { wsConnection.close(); wsConnection = nu
 
 function connectWS(id) {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  wsConnection = new WebSocket(`${proto}//${location.host}/ws/debate/${id}`);
+  const token = (localStorage.getItem('debate_token') || '');
+  wsConnection = new WebSocket(`${proto}//${location.host}/ws/debate/${id}?token=${encodeURIComponent(token)}`);
+  let currentStreamCard = null;
+  let currentThinkingEl = null;
+  let currentStreamText = '';
+
+  function getCurrentCard(model, round) {
+    const cardId = `round-${round}-${model.replace(/[^a-zA-Z0-9]/g,'')}`;
+    return document.getElementById(cardId);
+  }
+
+  function ensureStreamCard(data) {
+    const model = data.model || '';
+    const round = data.round || 0;
+    const card = getCurrentCard(model, round);
+    if (card) { card.querySelector('.msg-text').innerHTML = ''; return card; }
+    // Create a new card
+    const d = debates[id] || {};
+    const isA = model === d.name_a;
+    const isC = !isA && d.name_c && model === d.name_c;
+    const colorCls = isA ? 'msg-card-a' : isC ? 'msg-card-c' : 'msg-card-b';
+    const textCls = isA ? 'text-indigo-400' : isC ? 'text-amber-400' : 'text-teal-400';
+    const conv = document.getElementById('conversation');
+    const el = document.createElement('div');
+    el.className = `msg-card ${colorCls} glass rounded-xl p-4 fade-slide-up`;
+    el.dataset.round = round;
+    el.id = `round-${round}-${model.replace(/[^a-zA-Z0-9]/g,'')}`;
+    el.innerHTML = `
+      <div class="flex items-center justify-between mb-2">
+        <span class="${textCls} font-medium text-sm">第 ${round} 轮 — ${escHtml(model)}</span>
+        <span class="text-[10px] px-2 py-0.5 bg-indigo-500/20 text-indigo-400 rounded-full animate-pulse" id="streaming-badge">生成中...</span>
+      </div>
+      <div class="msg-text prose prose-invert max-w-none text-sm leading-relaxed"></div>`;
+    conv.appendChild(el);
+    return el;
+  }
+
   wsConnection.onmessage = (evt) => {
     try {
       const msg = JSON.parse(evt.data);
       if (msg.type === 'ping') return;
       if (msg.type === 'init') {
-        // Initial state — history already loaded, just update status/token
         if (msg.token_usage) {
           if (debates[id]) debates[id].token_usage = msg.token_usage;
           updateDebateTokenBar({token_usage: msg.token_usage});
@@ -1530,34 +1572,60 @@ function connectWS(id) {
         return;
       }
       const data = msg.data || {};
-      // Handle debate events same as SSE would
       if (msg.type === 'token_usage') {
         if (debates[id]) debates[id].token_usage = data;
         updateDebateTokenBar({token_usage: data});
         return;
       }
+      if (msg.type === 'content_start') {
+        currentStreamCard = ensureStreamCard(data);
+        currentThinkingEl = null;
+        currentStreamText = '';
+        if (data.model) {
+          const lbl = data.model === (debates[id]||{}).name_a ? 'A' : data.model === (debates[id]||{}).name_c ? 'C' : 'B';
+          setStatus(`${t('model_'+lbl.toLowerCase()) || data.model} ${t('thinking')}`, 'bg-indigo-500/20 text-indigo-400');
+        }
+        return;
+      }
       if (msg.type === 'thinking') {
-        // Append to current thinking block (handled by existing logic)
+        if (!currentStreamCard) return;
+        if (!currentThinkingEl) {
+          currentThinkingEl = document.createElement('div');
+          currentThinkingEl.className = 'thinking-block text-xs text-gray-500 mb-2 italic';
+          currentStreamCard.querySelector('.msg-text').prepend(currentThinkingEl);
+        }
+        currentThinkingEl.textContent += data.content || '';
         return;
       }
       if (msg.type === 'token') {
-        // Append to current message
-        return;
-      }
-      if (msg.type === 'content_start') {
-        // New message starting — handled by polling as fallback
+        currentStreamText += data.content || '';
+        if (currentStreamCard) {
+          if (currentThinkingEl) { currentThinkingEl.remove(); currentThinkingEl = null; }
+          currentStreamCard.querySelector('.msg-text').innerHTML = '';
+          renderContent(currentStreamCard.querySelector('.msg-text'), currentStreamText);
+        }
         return;
       }
       if (msg.type === 'content_end') {
-        // Message complete — trigger a poll to get the full history
+        if (currentStreamCard) {
+          const badge = currentStreamCard.querySelector('#streaming-badge');
+          if (badge) badge.remove();
+        }
+        currentStreamCard = null; currentThinkingEl = null; currentStreamText = '';
         pollDebateHistory(id);
         return;
       }
-      if (msg.type === 'round_end' || msg.type === 'round_start') {
+      if (msg.type === 'round_start') {
+        pollDebateHistory(id);
+        return;
+      }
+      if (msg.type === 'round_end') {
+        currentStreamCard = null; currentThinkingEl = null; currentStreamText = '';
         pollDebateHistory(id);
         return;
       }
       if (msg.type === 'debate_end' || msg.type === 'report_end' || msg.type === 'error') {
+        currentStreamCard = null; currentThinkingEl = null; currentStreamText = '';
         closeWS();
         pollDebateHistory(id);
         return;
@@ -1576,14 +1644,13 @@ function openDebate(id) {
   const d = debates[id]; if (!d) return;
   if (d.mode === 'chat') return openChatView(id);
   currentDebateId = id; currentView = 'debate'; lastRenderedRound = 0;
-  const d = debates[id]; if (!d) return;
   document.getElementById('debate-name-a').textContent = d.name_a;
   document.getElementById('debate-name-b').textContent = d.name_b;
   const hasC = d.mode === 'chain3' && d.name_c;
   document.getElementById('debate-vs-c').classList.toggle('hidden', !hasC);
   document.getElementById('debate-name-c').classList.toggle('hidden', !hasC);
   if (hasC) document.getElementById('debate-name-c').textContent = d.name_c;
-  const modeLabels = {sequential:'交替审查', blind:'独立辩论', chain3:'三人辩论'};
+  const modeLabels = {sequential: t('sequential'), blind: t('blind'), chain3: t('chain3')};
   document.getElementById('debate-mode-badge').textContent = modeLabels[d.mode] || d.mode;
   const isRunning = d.status === 'running';
   document.getElementById('btn-stop').classList.toggle('hidden', !isRunning);
@@ -1959,7 +2026,8 @@ async function sendChatMessage() {
 function connectChatWS(id) {
   if (wsConnection) { try { wsConnection.close(); } catch(e){} wsConnection = null; }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  wsConnection = new WebSocket(`${proto}//${location.host}/ws/chat/${id}`);
+  const wsToken = (localStorage.getItem('debate_token') || '');
+  wsConnection = new WebSocket(`${proto}//${location.host}/ws/chat/${id}?token=${encodeURIComponent(wsToken)}`);
   const container = document.getElementById('chat-messages');
 
   wsConnection.onmessage = (evt) => {

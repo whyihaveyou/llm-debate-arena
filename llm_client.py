@@ -134,7 +134,11 @@ class LLMClient:
 
     @staticmethod
     def estimate_tokens(text: str) -> int:
-        return len(text) // 3
+        if not text:
+            return 0
+        cjk = sum(1 for c in text if '\u4e00' <= c <= '\u9fff' or '\u3000' <= c <= '\u303f')
+        ascii_len = len(text) - cjk
+        return int(cjk * 1.5 + ascii_len / 4)
 
     @staticmethod
     def estimate_messages_tokens(messages: list[dict]) -> int:

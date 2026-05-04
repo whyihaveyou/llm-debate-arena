@@ -1,9 +1,8 @@
 import os
 import sqlite3
-import hashlib
-import secrets
 import logging
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta
 from pathlib import Path
 
 DB_PATH = Path(__file__).parent / "debate.db"
@@ -39,6 +38,21 @@ def decrypt_key(ciphertext: str) -> str:
         return ciphertext  # backward compat: not-yet-encrypted key
 
 
+# --- Password hashing (bcrypt) ---
+
+def _hash_pw(password: str) -> str:
+    import bcrypt
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_pw(password: str, hashed: str) -> bool:
+    import bcrypt
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
 # --- Database ---
 
 def get_db():
@@ -55,7 +69,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL,
+            salt TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS sessions (
@@ -92,20 +106,15 @@ def init_db():
     conn.close()
 
 
-def _hash_pw(password: str, salt: str | None = None) -> tuple[str, str]:
-    if salt is None:
-        salt = secrets.token_hex(16)
-    h = hashlib.sha256(f"{salt}:{password}".encode()).hexdigest()
-    return h, salt
-
+# --- User ---
 
 def create_user(username: str, password: str) -> bool:
     conn = get_db()
     try:
-        h, salt = _hash_pw(password)
+        hashed = _hash_pw(password)
         conn.execute(
-            "INSERT INTO users (username, password_hash, salt, created_at) VALUES (?, ?, ?, ?)",
-            (username, h, salt, datetime.now().isoformat()),
+            "INSERT INTO users (username, password_hash, salt, created_at) VALUES (?, ?, '', ?)",
+            (username, hashed, datetime.now().isoformat()),
         )
         conn.commit()
         return True
@@ -121,10 +130,24 @@ def verify_user(username: str, password: str) -> dict | None:
     conn.close()
     if not row:
         return None
-    h, _ = _hash_pw(password, row["salt"])
-    if h != row["password_hash"]:
+    d = dict(row)
+    # Migrate old SHA-256 hashes to bcrypt on successful login
+    if d["salt"] and not d["password_hash"].startswith("$2"):
+        import hashlib
+        h = hashlib.sha256(f"{d['salt']}:{password}".encode()).hexdigest()
+        if h != d["password_hash"]:
+            return None
+        # Upgrade to bcrypt
+        conn = get_db()
+        new_hash = _hash_pw(password)
+        conn.execute("UPDATE users SET password_hash = ?, salt = '' WHERE id = ?", (new_hash, d["id"]))
+        conn.commit()
+        conn.close()
+        log.info("Migrated user %s password to bcrypt", username)
+        d["password_hash"] = new_hash
+    elif not _verify_pw(password, d["password_hash"]):
         return None
-    return dict(row)
+    return d
 
 
 def create_session(user_id: int) -> str:
@@ -137,16 +160,33 @@ def create_session(user_id: int) -> str:
     return token
 
 
+SESSION_TTL_DAYS = 30
+
+
 def verify_session(token: str) -> dict | None:
     if not token or len(token) < 10:
         return None
     conn = get_db()
     row = conn.execute(
-        "SELECT s.token, s.user_id, u.username, u.is_admin FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = ?",
+        "SELECT s.token, s.user_id, s.created_at, u.username, u.is_admin FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.token = ?",
         (token,),
     ).fetchone()
+    if row:
+        d = dict(row)
+        # Check expiry
+        try:
+            created = datetime.fromisoformat(d["created_at"])
+            if datetime.now() - created > timedelta(days=SESSION_TTL_DAYS):
+                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                conn.commit()
+                conn.close()
+                return None
+        except Exception:
+            pass
+        conn.close()
+        return d
     conn.close()
-    return dict(row) if row else None
+    return None
 
 
 def delete_session(token: str):
@@ -155,6 +195,18 @@ def delete_session(token: str):
     conn.commit()
     conn.close()
 
+
+def cleanup_expired_sessions():
+    conn = get_db()
+    cutoff = (datetime.now() - timedelta(days=SESSION_TTL_DAYS)).isoformat()
+    cur = conn.execute("DELETE FROM sessions WHERE created_at < ?", (cutoff,))
+    if cur.rowcount:
+        log.info("Cleaned up %d expired sessions", cur.rowcount)
+    conn.commit()
+    conn.close()
+
+
+# --- User Models ---
 
 def get_user_models(user_id: int) -> list[dict]:
     conn = get_db()
@@ -189,14 +241,21 @@ def get_user_model(user_id: int, model_id: int) -> dict | None:
     return result
 
 
+_ALLOWED_MODEL_FIELDS = {"name", "base_url", "api_key", "model", "auth_type"}
+
+
 def update_user_model(model_id: int, user_id: int, **kwargs) -> bool:
     conn = get_db()
     existing = conn.execute("SELECT id FROM user_models WHERE id = ? AND user_id = ?", (model_id, user_id)).fetchone()
     if not existing:
         conn.close()
         return False
+    kwargs = {k: v for k, v in kwargs.items() if k in _ALLOWED_MODEL_FIELDS}
     if "api_key" in kwargs:
         kwargs["api_key"] = encrypt_key(kwargs["api_key"])
+    if not kwargs:
+        conn.close()
+        return False
     sets = ", ".join(f"{k} = ?" for k in kwargs)
     vals = list(kwargs.values()) + [model_id, user_id]
     conn.execute(f"UPDATE user_models SET {sets} WHERE id = ? AND user_id = ?", vals)

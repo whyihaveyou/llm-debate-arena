@@ -70,6 +70,7 @@ class ChatSession:
             "messages": self.messages,
             "token_usage": self.token_usage,
             "error_message": self.error_message,
+            "owner_id": getattr(self, 'owner_id', None),
         }
 
     def save_to_disk(self):

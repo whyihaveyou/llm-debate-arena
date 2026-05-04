@@ -1,5 +1,7 @@
 import asyncio
 import json
+import logging
+import shutil
 import subprocess
 import tempfile
 import time
@@ -14,7 +16,13 @@ from debate_engine import DebateSession, LLMClient
 from chat_engine import ChatSession, CHAT_SYSTEM_PROMPTS
 from db import (init_db, create_user, verify_user, create_session, verify_session, delete_session,
     get_user_models, add_user_model, get_user_model, update_user_model, delete_user_model,
-    get_quota_usage, increment_quota_usage, get_all_usage_stats, set_admin, get_all_users)
+    get_quota_usage, increment_quota_usage, get_all_usage_stats, set_admin, get_all_users,
+    cleanup_expired_sessions)
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+log = logging.getLogger("arena")
+
+UPLOAD_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
 app = FastAPI(title="AI Debate Arena")
 config = load_config()
@@ -41,8 +49,10 @@ _rate_concurrent: dict[int, int] = {}  # user_id -> running count
 async def startup():
     init_db()
     CONVERSATIONS_DIR.mkdir(exist_ok=True)
+    cleanup_expired_sessions()
     await check_model_health()
     load_persisted_debates()
+    log.info("Server started")
 
 
 def get_current_user(request: Request) -> dict | None:
@@ -61,10 +71,10 @@ def _require_admin(request: Request) -> dict:
     return user
 
 
-def _check_rate_limit(user_id: int) -> tuple[bool, str]:
+def _check_rate_limit(user_id: int, is_chat: bool = False) -> tuple[bool, str]:
     rl = config.get("rate_limit", {})
-    max_per_hour = rl.get("max_debates_per_hour", 10)
-    max_concurrent = rl.get("max_concurrent_debates", 3)
+    max_per_hour = rl.get("max_chats_per_hour" if is_chat else "max_debates_per_hour", 10)
+    max_concurrent = rl.get("max_concurrent_chats" if is_chat else "max_concurrent_debates", 3)
     now = time.time()
     hour_ago = now - 3600
     timestamps = [t for t in _rate_timestamps.get(user_id, []) if t > hour_ago]
@@ -106,7 +116,7 @@ async def check_model_health():
                     resp = await client.get(f"{base_url}", headers=headers)
                 else:
                     resp = await client.get(f"{base_url}/models", headers=headers)
-            model_health[mid] = {"ok": resp.status_code < 500, "status": resp.status_code}
+            model_health[mid] = {"ok": 200 <= resp.status_code < 300, "status": resp.status_code}
         except Exception as e:
             model_health[mid] = {"ok": False, "error": str(e)[:80]}
 
@@ -315,7 +325,9 @@ async def get_available_models(request: Request):
 # ===== Debates =====
 
 @app.get("/api/debates")
-async def list_debates():
+async def list_debates(request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     result = []
     for s in sessions.values():
         usage = dict(getattr(s, "token_usage", {}))
@@ -468,7 +480,9 @@ async def start_debate(request: Request):
 
 
 @app.get("/api/debate/stream/{session_id}")
-async def stream_debate(session_id: str):
+async def stream_debate(session_id: str, request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     queue = sessions[session_id].get_events()
@@ -496,6 +510,15 @@ async def stream_debate(session_id: str):
 @app.websocket("/ws/debate/{session_id}")
 async def ws_debate(websocket: WebSocket, session_id: str):
     if session_id not in sessions:
+        await websocket.close(code=4004, reason="会话不存在")
+        return
+    # Auth via query param or header
+    token = websocket.query_params.get("token", "")
+    if not token:
+        token = websocket.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not verify_session(token):
+        await websocket.close(code=4001, reason="未登录")
+        return
         await websocket.close(code=4004, reason="会话不存在")
         return
     await websocket.accept()
@@ -531,7 +554,9 @@ async def ws_debate(websocket: WebSocket, session_id: str):
 
 
 @app.post("/api/debate/stop/{session_id}")
-async def stop_debate(session_id: str):
+async def stop_debate(session_id: str, request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     sessions[session_id].stop()
@@ -542,7 +567,9 @@ async def stop_debate(session_id: str):
 
 
 @app.delete("/api/debate/{session_id}")
-async def delete_debate(session_id: str):
+async def delete_debate(session_id: str, request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     s = sessions.pop(session_id)
@@ -556,7 +583,9 @@ async def delete_debate(session_id: str):
 
 
 @app.get("/api/debate/history/{session_id}")
-async def get_history(session_id: str):
+async def get_history(session_id: str, request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     s = sessions[session_id]
@@ -574,19 +603,44 @@ async def get_history(session_id: str):
 
 
 @app.get("/api/debate/export/{session_id}")
-async def export_debate(session_id: str):
+async def export_debate(session_id: str, request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     return {"content": sessions[session_id].save_markdown()}
 
 
 @app.get("/api/debate/export/pdf/{session_id}")
-async def export_debate_pdf(session_id: str):
+async def export_debate_pdf(session_id: str, request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     md_content = sessions[session_id].save_markdown()
     pdf_path = await _md_to_pdf(md_content, f"debate_{session_id}")
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"debate_{session_id}.pdf")
+
+
+def _build_compile_prompt(session) -> str:
+    transcript = "\n\n".join(f"## 第 {e['round']} 轮 — {e['model']}\n\n{e['content']}" for e in session.history)
+    model_count = "多个" if session.mode == "chain3" else "两个"
+    return (
+        f"基于以下{model_count}AI模型关于「{session.topic}」的讨论记录，"
+        f"请整理出一份完整、严谨的分析。\n\n"
+        f"要求：\n1. 综合模型达成共识的部分\n"
+        f"2. 对于仍存在分歧的部分，给出你认为更正确的推导或实现\n"
+        f"3. 数学/物理问题使用清晰的步骤和 LaTeX 公式；代码问题给出完整实现和分析\n"
+        f"4. 标注关键结论\n\n"
+        f"讨论记录：\n\n{transcript}"
+    )
+
+
+def _get_compile_client(session, use_model: str = "a"):
+    model_cfg = _resolve_session_model(session, use_model)
+    if not model_cfg:
+        raise HTTPException(400, "模型配置未找到")
+    return LLMClient(model_cfg["base_url"], model_cfg["api_key"], model_cfg["model"], model_cfg.get("auth_type", "bearer"))
 
 
 @app.post("/api/debate/compile/pdf/{session_id}")
@@ -597,22 +651,8 @@ async def export_compile_pdf(session_id: str, request: Request):
     if not session.history:
         raise HTTPException(400, "对话记录为空")
     data = await request.json()
-    use_model = data.get("model", "a")
-    model_cfg = _resolve_session_model(session, use_model)
-    if not model_cfg:
-        raise HTTPException(400, "模型配置未找到")
-    client = LLMClient(model_cfg["base_url"], model_cfg["api_key"], model_cfg["model"], model_cfg.get("auth_type", "bearer"))
-    transcript = "\n\n".join(f"## 第 {e['round']} 轮 — {e['model']}\n\n{e['content']}" for e in session.history)
-    prompt = (
-        f"基于以下两个AI模型关于「{session.topic}」的讨论记录，"
-        f"请整理出一份完整、严谨的分析。\n\n"
-        f"要求：\n1. 综合两个模型达成共识的部分\n"
-        f"2. 对于仍存在分歧的部分，给出你认为更正确的推导或实现\n"
-        f"3. 数学/物理问题使用清晰的步骤和 LaTeX 公式；代码问题给出完整实现和分析\n"
-        f"4. 标注关键结论\n\n"
-        f"讨论记录：\n\n{transcript}"
-    )
-    result = await client.chat([{"role": "user", "content": prompt}])
+    client = _get_compile_client(session, data.get("model", "a"))
+    result = await client.chat([{"role": "user", "content": _build_compile_prompt(session)}])
     pdf_path = await _md_to_pdf(result, f"derivation_{session_id}")
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"derivation_{session_id}.pdf")
 
@@ -625,46 +665,24 @@ async def compile_debate(session_id: str, request: Request):
     if not session.history:
         raise HTTPException(400, "对话记录为空")
     data = await request.json()
-    use_model = data.get("model", "a")
-    model_cfg = _resolve_session_model(session, use_model)
-    if not model_cfg:
-        raise HTTPException(400, "模型配置未找到")
-    client = LLMClient(model_cfg["base_url"], model_cfg["api_key"], model_cfg["model"], model_cfg.get("auth_type", "bearer"))
-    transcript = "\n\n".join(f"## 第 {e['round']} 轮 — {e['model']}\n\n{e['content']}" for e in session.history)
-    prompt = (
-        f"基于以下两个AI模型关于「{session.topic}」的讨论记录，"
-        f"请整理出一份完整、严谨的分析。\n\n"
-        f"要求：\n1. 综合两个模型达成共识的部分\n"
-        f"2. 对于仍存在分歧的部分，给出你认为更正确的推导或实现\n"
-        f"3. 数学/物理问题使用清晰的步骤和 LaTeX 公式；代码问题给出完整实现和分析\n"
-        f"4. 标注关键结论\n\n"
-        f"讨论记录：\n\n{transcript}"
-    )
-    result = await client.chat([{"role": "user", "content": prompt}])
+    client = _get_compile_client(session, data.get("model", "a"))
+    result = await client.chat([{"role": "user", "content": _build_compile_prompt(session)}])
     return {"content": result}
 
 
 @app.get("/api/debate/compile/stream/{session_id}")
-async def compile_debate_stream(session_id: str, model: str = "a"):
+async def compile_debate_stream(session_id: str, model: str = "a", request: Request = None):
+    if request:
+        user = get_current_user(request)
+        if not user:
+            raise HTTPException(401, "未登录")
     if session_id not in sessions:
         raise HTTPException(404, "会话不存在")
     session = sessions[session_id]
     if not session.history:
         raise HTTPException(400, "对话记录为空")
-    model_cfg = _resolve_session_model(session, model)
-    if not model_cfg:
-        raise HTTPException(400, "模型配置未找到")
-    client = LLMClient(model_cfg["base_url"], model_cfg["api_key"], model_cfg["model"], model_cfg.get("auth_type", "bearer"))
-    transcript = "\n\n".join(f"## 第 {e['round']} 轮 — {e['model']}\n\n{e['content']}" for e in session.history)
-    prompt = (
-        f"基于以下两个AI模型关于「{session.topic}」的讨论记录，"
-        f"请整理出一份完整、严谨的分析。\n\n"
-        f"要求：\n1. 综合两个模型达成共识的部分\n"
-        f"2. 对于仍存在分歧的部分，给出你认为更正确的推导或实现\n"
-        f"3. 数学/物理问题使用清晰的步骤和 LaTeX 公式；代码问题给出完整实现和分析\n"
-        f"4. 标注关键结论\n\n"
-        f"讨论记录：\n\n{transcript}"
-    )
+    client = _get_compile_client(session, model)
+    prompt = _build_compile_prompt(session)
 
     async def generate():
         from llm_client import is_thinking_token
@@ -680,7 +698,11 @@ async def compile_debate_stream(session_id: str, model: str = "a"):
 
 
 @app.get("/api/debate/search")
-async def search_debates(q: str = ""):
+async def search_debates(q: str = "", request: Request = None):
+    if request:
+        user = get_current_user(request)
+        if not user:
+            raise HTTPException(401, "未登录")
     if not q.strip():
         return {"results": []}
     q = q.strip().lower()
@@ -858,7 +880,7 @@ async def start_chat(request: Request):
     if not model_id:
         raise HTTPException(400, "请选择模型")
 
-    allowed, rl_msg = _check_rate_limit(user["user_id"])
+    allowed, rl_msg = _check_rate_limit(user["user_id"], is_chat=True)
     if not allowed:
         raise HTTPException(429, rl_msg)
 
@@ -931,6 +953,14 @@ async def ws_chat(websocket: WebSocket, session_id: str):
     if session_id not in sessions:
         await websocket.close(code=4004, reason="会话不存在")
         return
+    token = websocket.query_params.get("token", "")
+    if not token:
+        token = websocket.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not verify_session(token):
+        await websocket.close(code=4001, reason="未登录")
+        return
+        await websocket.close(code=4004, reason="会话不存在")
+        return
     session = sessions[session_id]
     await websocket.accept()
     init_data = {
@@ -973,6 +1003,8 @@ async def upload_file(request: Request):
     if not file.filename:
         raise HTTPException(400, "文件名无效")
     content_bytes = await file.read()
+    if len(content_bytes) > UPLOAD_MAX_BYTES:
+        raise HTTPException(413, f"文件大小不能超过 {UPLOAD_MAX_BYTES // (1024*1024)} MB")
     try:
         text = content_bytes.decode("utf-8")
     except UnicodeDecodeError:
@@ -1019,19 +1051,28 @@ document.querySelectorAll('.math-block').forEach(el => {{
         html_path = f.name
     pdf_path = html_path.replace(".html", ".pdf")
     try:
+        chrome = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser") or (
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" if Path("/Applications/Google Chrome.app").exists() else None
+        )
+        if not chrome:
+            raise RuntimeError("No Chrome/Chromium found for PDF generation")
         subprocess.run(
-            ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-             "--headless", "--disable-gpu", "--no-sandbox",
+            [chrome, "--headless", "--disable-gpu", "--no-sandbox",
              f"--print-to-pdf={pdf_path}", "--print-to-pdf-no-header", html_path],
             capture_output=True, text=True, timeout=30,
         )
     except Exception as e:
-        raise HTTPException(500, f"PDF 生成失败: {e}")
-    finally:
         try: Path(html_path).unlink(missing_ok=True)
         except Exception: pass
+        raise HTTPException(500, f"PDF 生成失败: {e}")
     if not Path(pdf_path).exists():
         raise HTTPException(500, "PDF 生成失败")
+    # Schedule cleanup of temp PDF after response
+    import atexit
+    def _cleanup(p=pdf_path):
+        try: Path(p).unlink(missing_ok=True)
+        except Exception: pass
+    atexit.register(_cleanup)
     return pdf_path
 
 

@@ -1,5 +1,6 @@
 # Environment & secrets
 .env
+config.json
 
 # Database (contains encrypted API keys and user data)
 *.db
