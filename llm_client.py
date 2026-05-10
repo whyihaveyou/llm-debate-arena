@@ -1,8 +1,11 @@
 import json
+import time
 import httpx
 from typing import AsyncGenerator
 
 THINKING_TOKEN = "\x00T\x00"  # sentinel marker for thinking chunks
+STREAM_TOTAL_TIMEOUT = 300  # 5 minutes absolute wall-clock limit per call
+STREAM_IDLE_TIMEOUT = 30    # 30 seconds no data = stall
 
 
 class TokenUsage:
@@ -56,11 +59,16 @@ class LLMClient:
         return body
 
     async def chat_stream(self, messages: list[dict]) -> AsyncGenerator[str, None]:
+        deadline = time.monotonic() + STREAM_TOTAL_TIMEOUT
         if self.auth_type == "anthropic":
             async for chunk in self._stream_anthropic(messages):
+                if time.monotonic() > deadline:
+                    raise TimeoutError("LLM stream exceeded total time limit")
                 yield chunk
         else:
             async for chunk in self._stream_openai(messages):
+                if time.monotonic() > deadline:
+                    raise TimeoutError("LLM stream exceeded total time limit")
                 yield chunk
 
     async def _stream_openai(self, messages: list[dict]) -> AsyncGenerator[str, None]:
@@ -74,7 +82,10 @@ class LLMClient:
                 if response.status_code != 200:
                     error_body = await response.aread()
                     raise Exception(f"LLM API error {response.status_code}: {error_body.decode()}")
+                last_activity = time.monotonic()
                 async for line in response.aiter_lines():
+                    if time.monotonic() - last_activity > STREAM_IDLE_TIMEOUT:
+                        raise TimeoutError("LLM stream idle for too long")
                     if not line.startswith("data:"):
                         continue
                     data = line[5:].lstrip()
@@ -86,10 +97,12 @@ class LLMClient:
                         # Thinking content (MiMo uses reasoning_content)
                         reasoning = delta.get("reasoning_content")
                         if reasoning:
+                            last_activity = time.monotonic()
                             yield THINKING_TOKEN + reasoning
                         # Regular content
                         content = delta.get("content")
                         if content:
+                            last_activity = time.monotonic()
                             yield content
                     except (json.JSONDecodeError, KeyError, IndexError):
                         pass
@@ -106,7 +119,10 @@ class LLMClient:
                 if response.status_code != 200:
                     error_body = await response.aread()
                     raise Exception(f"LLM API error {response.status_code}: {error_body.decode()}")
+                last_activity = time.monotonic()
                 async for line in response.aiter_lines():
+                    if time.monotonic() - last_activity > STREAM_IDLE_TIMEOUT:
+                        raise TimeoutError("LLM stream idle for too long")
                     if not line.startswith("data:"):
                         continue
                     data = line[5:].lstrip()
@@ -114,13 +130,13 @@ class LLMClient:
                         chunk = json.loads(data)
                         if chunk.get("type") == "content_block_delta":
                             delta = chunk.get("delta", {})
-                            # Thinking content (Kimi uses thinking_delta)
                             thinking = delta.get("thinking")
                             if thinking:
+                                last_activity = time.monotonic()
                                 yield THINKING_TOKEN + thinking
-                            # Regular text content
                             text = delta.get("text", "")
                             if text:
+                                last_activity = time.monotonic()
                                 yield text
                     except (json.JSONDecodeError, KeyError, IndexError):
                         pass

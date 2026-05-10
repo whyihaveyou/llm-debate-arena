@@ -129,10 +129,12 @@ class DebateSession:
         self.error_message = ""
         self.report = ""
         self.report_model = ""
+        self.quality_score = ""
         self.created_at = datetime.now().isoformat()
         self.token_usage = {}  # model_name -> {"prompt": int, "completion": int, "thinking": int, "total": int, "calls": int}
-        self._event_queue: asyncio.Queue = asyncio.Queue()
+        self._event_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self._stop_flag = False
+        self.owner_id: int | None = None
 
     def _get_system_prompt(self, mode: str) -> str:
         if mode == "blind":
@@ -148,7 +150,17 @@ class DebateSession:
             self.messages_c[0] = {"role": "system", "content": sys_prompt}
 
     def _emit(self, event_type: str, data: dict):
-        self._event_queue.put_nowait(_DebateEvent(event_type, data))
+        try:
+            self._event_queue.put_nowait(_DebateEvent(event_type, data))
+        except asyncio.QueueFull:
+            try:
+                self._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                self._event_queue.put_nowait(_DebateEvent(event_type, data))
+            except asyncio.QueueFull:
+                pass
 
     def _check_agreement(self, text: str) -> bool:
         return text.strip().upper().startswith("[AGREE]")
@@ -169,6 +181,8 @@ class DebateSession:
             "error_message": self.error_message,
             "history": self.history,
             "token_usage": self.token_usage,
+            "owner_id": self.owner_id,
+            "quality_score": self.quality_score,
         }
 
     def save_to_disk(self):
@@ -205,7 +219,7 @@ class DebateSession:
         s.messages_a = []
         s.messages_b = []
         s.messages_c = []
-        s._event_queue = asyncio.Queue()
+        s._event_queue = asyncio.Queue(maxsize=1000)
         s._stop_flag = False
         s.memory_masking = data.get("memory_masking", False)
         s.masking_model = None
@@ -214,9 +228,12 @@ class DebateSession:
         s.embedding_key = data.get("embedding_key", "")
         s.embedding_model = data.get("embedding_model", "")
         s.lang = "zh"
+        s.owner_id = data.get("owner_id")
+        s.quality_score = data.get("quality_score", "")
         return s
 
     async def run(self):
+        self._stop_flag = False
         if self.mode == "blind":
             await self.run_blind()
         elif self.mode == "chain3":
@@ -665,6 +682,13 @@ class DebateSession:
 
     def get_events(self) -> asyncio.Queue:
         return self._event_queue
+
+    def clear_queue(self):
+        while not self._event_queue.empty():
+            try:
+                self._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
     def save_markdown(self) -> str:
         CONVERSATIONS_DIR.mkdir(exist_ok=True)

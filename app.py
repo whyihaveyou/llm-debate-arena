@@ -1,11 +1,14 @@
 import asyncio
+import ipaddress
 import json
 import logging
+import re
 import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, Request, HTTPException, Depends, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,9 +43,63 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    path = request.url.path
+    if path in ("/", "/favicon.ico") or path.startswith("/static"):
+        return await call_next(request)
+    start = time.monotonic()
+    response = await call_next(request)
+    duration_ms = (time.monotonic() - start) * 1000
+    if response.status_code == 429:
+        response.headers["Retry-After"] = "60"
+    log.info("%s %s → %d (%.0fms)", request.method, path, response.status_code, duration_ms)
+    return response
+
 # Rate limiting (in-memory, fine for small groups)
 _rate_timestamps: dict[int, list[float]] = {}  # user_id -> timestamps
 _rate_concurrent: dict[int, int] = {}  # user_id -> running count
+_rate_lock = asyncio.Lock()
+
+# SSRF protection
+_ALLOWED_URL_SCHEMES = {"https", "http"}
+_MAX_MESSAGE_CHARS = 32768  # ~32K chars
+
+
+def _validate_url(url: str) -> str:
+    """Validate a URL is safe to fetch — rejects private/internal IPs and non-HTTP schemes."""
+    url = url.strip().rstrip("/")
+    if not url:
+        raise HTTPException(400, "URL 不能为空")
+    parsed = urlparse(url)
+    if parsed.scheme not in _ALLOWED_URL_SCHEMES:
+        raise HTTPException(400, "仅支持 http/https 协议")
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(400, "URL 格式无效")
+    # Block private/loopback/link-local IPs
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved:
+            raise HTTPException(400, "不允许访问内网地址")
+    except ValueError:
+        pass  # hostname is a domain, not an IP — check via DNS
+    # Reject common internal hostnames
+    internal_patterns = (
+        r"^localhost$",
+        r"^localhost\.local$",
+        r"^127\.",
+        r"^10\.",
+        r"^172\.(1[6-9]|2\d|3[01])\.",
+        r"^192\.168\.",
+        r"^0\.",
+        r"^\[::1\]",
+    )
+    for pat in internal_patterns:
+        if re.match(pat, hostname, re.IGNORECASE):
+            raise HTTPException(400, "不允许访问内网地址")
+    return url
 
 
 @app.on_event("startup")
@@ -71,29 +128,34 @@ def _require_admin(request: Request) -> dict:
     return user
 
 
-def _check_rate_limit(user_id: int, is_chat: bool = False) -> tuple[bool, str]:
-    rl = config.get("rate_limit", {})
-    max_per_hour = rl.get("max_chats_per_hour" if is_chat else "max_debates_per_hour", 10)
-    max_concurrent = rl.get("max_concurrent_chats" if is_chat else "max_concurrent_debates", 3)
-    now = time.time()
-    hour_ago = now - 3600
-    timestamps = [t for t in _rate_timestamps.get(user_id, []) if t > hour_ago]
-    _rate_timestamps[user_id] = timestamps
-    if len(timestamps) >= max_per_hour:
-        return False, f"每小时最多创建 {max_per_hour} 场辩论，请稍后再试"
-    concurrent = _rate_concurrent.get(user_id, 0)
-    if concurrent >= max_concurrent:
-        return False, f"最多同时进行 {max_concurrent} 场辩论，请等待当前辩论结束"
-    return True, ""
+async def _check_rate_limit(user_id: int, is_chat: bool = False) -> tuple[bool, str]:
+    async with _rate_lock:
+        rl = config.get("rate_limit", {})
+        max_per_hour = rl.get("max_chats_per_hour" if is_chat else "max_debates_per_hour", 10)
+        max_concurrent = rl.get("max_concurrent_chats" if is_chat else "max_concurrent_debates", 3)
+        now = time.time()
+        hour_ago = now - 3600
+        timestamps = [t for t in _rate_timestamps.get(user_id, []) if t > hour_ago]
+        _rate_timestamps[user_id] = timestamps
+        if len(timestamps) >= max_per_hour:
+            label = "聊天" if is_chat else "辩论"
+            return False, f"每小时最多创建 {max_per_hour} 次{label}，请稍后再试"
+        concurrent = _rate_concurrent.get(user_id, 0)
+        if concurrent >= max_concurrent:
+            label = "聊天" if is_chat else "辩论"
+            return False, f"最多同时进行 {max_concurrent} 场{label}，请等待当前结束"
+        return True, ""
 
 
-def _record_debate_start(user_id: int):
-    _rate_timestamps.setdefault(user_id, []).append(time.time())
-    _rate_concurrent[user_id] = _rate_concurrent.get(user_id, 0) + 1
+async def _record_debate_start(user_id: int):
+    async with _rate_lock:
+        _rate_timestamps.setdefault(user_id, []).append(time.time())
+        _rate_concurrent[user_id] = _rate_concurrent.get(user_id, 0) + 1
 
 
-def _record_debate_end(user_id: int):
-    _rate_concurrent[user_id] = max(0, _rate_concurrent.get(user_id, 0) - 1)
+async def _record_debate_end(user_id: int):
+    async with _rate_lock:
+        _rate_concurrent[user_id] = max(0, _rate_concurrent.get(user_id, 0) - 1)
 
 
 async def check_model_health():
@@ -130,6 +192,9 @@ def load_persisted_debates():
             else:
                 s = DebateSession.load_from_disk(f)
             sessions[s.id] = s
+            owner_id = getattr(s, "owner_id", None)
+            if owner_id is not None:
+                _session_users[s.id] = owner_id
         except Exception:
             pass
 
@@ -157,6 +222,21 @@ def _resolve_model(model_key: str, user_id: int = None) -> dict | None:
         except ValueError:
             pass
     return config["models"].get(model_key)
+
+
+def _require_session_owner(request: Request, session_id: str):
+    """Return (user, session) if session exists and belongs to current user, else raise."""
+    if session_id not in sessions:
+        raise HTTPException(404, "会话不存在")
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(401, "未登录")
+    session = sessions[session_id]
+    owner = _session_users.get(session_id) or getattr(session, "owner_id", None)
+    # Admins can access any session; otherwise check ownership
+    if owner is not None and owner != user["user_id"] and not user.get("is_admin"):
+        raise HTTPException(403, "无权访问此会话")
+    return user, session
 
 
 def _resolve_session_model(session, which: str = "a") -> dict | None:
@@ -269,6 +349,7 @@ async def add_custom_model(request: Request):
     auth_type = data.get("auth_type", "bearer")
     if not all([name, base_url, api_key, model]):
         raise HTTPException(400, "请填写所有必填项")
+    _validate_url(base_url)
     mid = add_user_model(user["user_id"], name, base_url, api_key, model, auth_type)
     return {"ok": True, "id": mid}
 
@@ -283,6 +364,8 @@ async def edit_custom_model(model_id: int, request: Request):
     for k in ("name", "base_url", "api_key", "model", "auth_type"):
         if k in data:
             fields[k] = data[k]
+    if "base_url" in fields:
+        _validate_url(fields["base_url"])
     if not update_user_model(model_id, user["user_id"], **fields):
         raise HTTPException(404, "模型不存在")
     return {"ok": True}
@@ -326,10 +409,14 @@ async def get_available_models(request: Request):
 
 @app.get("/api/debates")
 async def list_debates(request: Request):
-    if not get_current_user(request):
+    user = get_current_user(request)
+    if not user:
         raise HTTPException(401, "未登录")
     result = []
     for s in sessions.values():
+        owner = _session_users.get(s.id) or getattr(s, "owner_id", None)
+        if owner is not None and owner != user["user_id"] and not user.get("is_admin"):
+            continue
         usage = dict(getattr(s, "token_usage", {}))
         if usage:
             usage["_total"] = sum(v.get("total", 0) for v in usage.values() if isinstance(v, dict))
@@ -367,6 +454,8 @@ async def start_debate(request: Request):
     embedding_url = data.get("embedding_url", "").strip()
     embedding_key = data.get("embedding_key", "").strip()
     embedding_model_id = data.get("embedding_model", "").strip()
+    if diversity_retention and embedding_url:
+        _validate_url(embedding_url)
 
     if mode not in ("sequential", "blind", "chain3"):
         raise HTTPException(400, "无效的辩论模式")
@@ -377,7 +466,7 @@ async def start_debate(request: Request):
         raise HTTPException(400, f"主题长度不能超过 {topic_max} 个字符")
 
     # Rate limit
-    allowed, rl_msg = _check_rate_limit(user["user_id"])
+    allowed, rl_msg = await _check_rate_limit(user["user_id"])
     if not allowed:
         raise HTTPException(429, rl_msg)
 
@@ -465,27 +554,48 @@ async def start_debate(request: Request):
         session.set_lang(lang)
     sessions[session.id] = session
     _session_users[session.id] = user["user_id"]
-    _record_debate_start(user["user_id"])
+    await _record_debate_start(user["user_id"])
     if uses_shared:
         increment_quota_usage(user["user_id"])
+
+async def _auto_score_session(session):
+    if not session.history:
+        return
+    try:
+        model_cfg = _resolve_session_model(session, "a")
+        if not model_cfg:
+            return
+        client = LLMClient(model_cfg["base_url"], model_cfg["api_key"], model_cfg["model"], model_cfg.get("auth_type", "bearer"))
+        transcript = "\n\n".join(f"R{e['round']} — {e['model']}\n\n{e['content'][:3000]}" for e in session.history[-10:])
+        prompt = (
+            f"Rate this debate on '{session.topic}' ({session.round} rounds, {session.status}). "
+            f"Output ONLY a JSON object: "
+            f"{{\"logic\": <1-10>, \"evidence\": <1-10>, \"rebuttal\": <1-10>, "
+            f"\"conclusion\": <1-10>, \"efficiency\": <1-10>, \"overall\": <1-10>}}\n\n"
+            f"Transcript (last 10 entries):\n{transcript}"
+        )
+        result = await client.chat([{"role": "user", "content": prompt}])
+        session.quality_score = result
+        session.save_to_disk()
+    except Exception:
+        pass
 
     async def _run_and_cleanup():
         await session.run()
         await asyncio.sleep(0.5)
         uid = _session_users.pop(session.id, None)
         if uid:
-            _record_debate_end(uid)
+            await _record_debate_end(uid)
+        if session.history and getattr(session, 'mode', '') != 'chat' and session.status not in ("running", "idle", "error"):
+            asyncio.create_task(_auto_score_session(session))
     asyncio.create_task(_run_and_cleanup())
     return {"session_id": session.id}
 
 
 @app.get("/api/debate/stream/{session_id}")
 async def stream_debate(session_id: str, request: Request):
-    if not get_current_user(request):
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    queue = sessions[session_id].get_events()
+    user, session = _require_session_owner(request, session_id)
+    queue = session.get_events()
 
     async def event_generator():
         try:
@@ -519,12 +629,17 @@ async def ws_debate(websocket: WebSocket, session_id: str):
     if not verify_session(token):
         await websocket.close(code=4001, reason="未登录")
         return
-        await websocket.close(code=4004, reason="会话不存在")
-        return
     await websocket.accept()
     queue = sessions[session_id].get_events()
     # Send current history as initial batch
     session = sessions[session_id]
+    # Verify ownership
+    owner = _session_users.get(session_id) or getattr(session, "owner_id", None)
+    if owner is not None:
+        u = verify_session(token)
+        if u and u["user_id"] != owner and not u.get("is_admin"):
+            await websocket.close(code=4003, reason="无权访问此会话")
+            return
     init_data = {
         "type": "init",
         "history": session.history,
@@ -548,18 +663,15 @@ async def ws_debate(websocket: WebSocket, session_id: str):
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
-        pass
+        sessions[session_id].clear_queue()
     except Exception:
         pass
 
 
 @app.post("/api/debate/stop/{session_id}")
 async def stop_debate(session_id: str, request: Request):
-    if not get_current_user(request):
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    sessions[session_id].stop()
+    user, session = _require_session_owner(request, session_id)
+    session.stop()
     uid = _session_users.pop(session_id, None)
     if uid:
         _record_debate_end(uid)
@@ -568,11 +680,9 @@ async def stop_debate(session_id: str, request: Request):
 
 @app.delete("/api/debate/{session_id}")
 async def delete_debate(session_id: str, request: Request):
-    if not get_current_user(request):
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    s = sessions.pop(session_id)
+    user, session = _require_session_owner(request, session_id)
+    session.clear_queue()
+    sessions.pop(session_id, None)
     uid = _session_users.pop(session_id, None)
     if uid:
         _record_debate_end(uid)
@@ -582,13 +692,21 @@ async def delete_debate(session_id: str, request: Request):
     return {"ok": True}
 
 
+@app.put("/api/debate/{session_id}")
+async def rename_session(session_id: str, request: Request):
+    user, session = _require_session_owner(request, session_id)
+    data = await request.json()
+    new_topic = data.get("topic", "").strip()
+    if not new_topic or len(new_topic) > 500:
+        raise HTTPException(400, "名称长度必须在 1-500 之间")
+    session.topic = new_topic
+    session.save_to_disk()
+    return {"ok": True, "topic": new_topic}
+
+
 @app.get("/api/debate/history/{session_id}")
 async def get_history(session_id: str, request: Request):
-    if not get_current_user(request):
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    s = sessions[session_id]
+    user, s = _require_session_owner(request, session_id)
     usage = dict(getattr(s, "token_usage", {}))
     if usage:
         usage["_total"] = sum(v.get("total", 0) for v in usage.values() if isinstance(v, dict))
@@ -599,25 +717,20 @@ async def get_history(session_id: str, request: Request):
         "round": s.round, "mode": getattr(s, "mode", "sequential"),
         "history": s.history, "report": s.report, "report_model": s.report_model,
         "token_usage": usage,
+        "quality_score": getattr(s, "quality_score", ""),
     }
 
 
 @app.get("/api/debate/export/{session_id}")
 async def export_debate(session_id: str, request: Request):
-    if not get_current_user(request):
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    return {"content": sessions[session_id].save_markdown()}
+    user, session = _require_session_owner(request, session_id)
+    return {"content": session.save_markdown()}
 
 
 @app.get("/api/debate/export/pdf/{session_id}")
 async def export_debate_pdf(session_id: str, request: Request):
-    if not get_current_user(request):
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    md_content = sessions[session_id].save_markdown()
+    user, session = _require_session_owner(request, session_id)
+    md_content = session.save_markdown()
     pdf_path = await _md_to_pdf(md_content, f"debate_{session_id}")
     return FileResponse(pdf_path, media_type="application/pdf", filename=f"debate_{session_id}.pdf")
 
@@ -645,9 +758,7 @@ def _get_compile_client(session, use_model: str = "a"):
 
 @app.post("/api/debate/compile/pdf/{session_id}")
 async def export_compile_pdf(session_id: str, request: Request):
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    session = sessions[session_id]
+    user, session = _require_session_owner(request, session_id)
     if not session.history:
         raise HTTPException(400, "对话记录为空")
     data = await request.json()
@@ -659,9 +770,7 @@ async def export_compile_pdf(session_id: str, request: Request):
 
 @app.post("/api/debate/compile/{session_id}")
 async def compile_debate(session_id: str, request: Request):
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    session = sessions[session_id]
+    user, session = _require_session_owner(request, session_id)
     if not session.history:
         raise HTTPException(400, "对话记录为空")
     data = await request.json()
@@ -671,14 +780,8 @@ async def compile_debate(session_id: str, request: Request):
 
 
 @app.get("/api/debate/compile/stream/{session_id}")
-async def compile_debate_stream(session_id: str, model: str = "a", request: Request = None):
-    if request:
-        user = get_current_user(request)
-        if not user:
-            raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    session = sessions[session_id]
+async def compile_debate_stream(session_id: str, request: Request, model: str = "a"):
+    user, session = _require_session_owner(request, session_id)
     if not session.history:
         raise HTTPException(400, "对话记录为空")
     client = _get_compile_client(session, model)
@@ -698,16 +801,18 @@ async def compile_debate_stream(session_id: str, model: str = "a", request: Requ
 
 
 @app.get("/api/debate/search")
-async def search_debates(q: str = "", request: Request = None):
-    if request:
-        user = get_current_user(request)
-        if not user:
-            raise HTTPException(401, "未登录")
+async def search_debates(request: Request, q: str = ""):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     if not q.strip():
         return {"results": []}
     q = q.strip().lower()
+    user = get_current_user(request)
     results = []
     for s in sessions.values():
+        owner = _session_users.get(s.id) or getattr(s, "owner_id", None)
+        if owner is not None and owner != user["user_id"] and not user.get("is_admin"):
+            continue
         score = 0
         if q in s.topic.lower():
             score += 10
@@ -730,12 +835,7 @@ async def search_debates(q: str = "", request: Request = None):
 @app.get("/api/debate/analyze/{session_id}")
 async def analyze_persuasion(session_id: str, request: Request):
     """Use LLM to analyze persuasion dynamics after debate."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    session = sessions[session_id]
+    user, session = _require_session_owner(request, session_id)
     if not session.history or session.status == "running":
         raise HTTPException(400, "辩论尚未结束")
     model_cfg = _resolve_session_model(session, "a")
@@ -762,12 +862,7 @@ async def analyze_persuasion(session_id: str, request: Request):
 @app.get("/api/debate/score/{session_id}")
 async def score_debate(session_id: str, request: Request):
     """Use LLM to score debate quality after it ends."""
-    user = get_current_user(request)
-    if not user:
-        raise HTTPException(401, "未登录")
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    session = sessions[session_id]
+    user, session = _require_session_owner(request, session_id)
     if not session.history or session.status == "running":
         raise HTTPException(400, "辩论尚未结束")
     model_cfg = _resolve_session_model(session, "b")
@@ -880,7 +975,7 @@ async def start_chat(request: Request):
     if not model_id:
         raise HTTPException(400, "请选择模型")
 
-    allowed, rl_msg = _check_rate_limit(user["user_id"], is_chat=True)
+    allowed, rl_msg = await _check_rate_limit(user["user_id"], is_chat=True)
     if not allowed:
         raise HTTPException(429, rl_msg)
 
@@ -913,7 +1008,7 @@ async def start_chat(request: Request):
         session.set_lang(lang)
     sessions[session.id] = session
     _session_users[session.id] = user["user_id"]
-    _record_debate_start(user["user_id"])
+    await _record_debate_start(user["user_id"])
     if uses_shared:
         increment_quota_usage(user["user_id"])
     return {"session_id": session.id}
@@ -921,9 +1016,7 @@ async def start_chat(request: Request):
 
 @app.post("/api/chat/send/{session_id}")
 async def chat_send(session_id: str, request: Request):
-    if session_id not in sessions:
-        raise HTTPException(404, "会话不存在")
-    session = sessions[session_id]
+    user, session = _require_session_owner(request, session_id)
     if session.mode != "chat":
         raise HTTPException(400, "非聊天会话")
     if session.status == "running":
@@ -933,6 +1026,8 @@ async def chat_send(session_id: str, request: Request):
     message = data.get("message", "").strip()
     if not message:
         raise HTTPException(400, "消息不能为空")
+    if len(message) > _MAX_MESSAGE_CHARS:
+        raise HTTPException(400, f"消息长度不能超过 {_MAX_MESSAGE_CHARS} 个字符")
 
     if not session.model:
         user_id = getattr(session, 'owner_id', None)
@@ -959,9 +1054,14 @@ async def ws_chat(websocket: WebSocket, session_id: str):
     if not verify_session(token):
         await websocket.close(code=4001, reason="未登录")
         return
-        await websocket.close(code=4004, reason="会话不存在")
-        return
     session = sessions[session_id]
+    # Verify ownership
+    owner = _session_users.get(session_id) or getattr(session, "owner_id", None)
+    if owner is not None:
+        u = verify_session(token)
+        if u and u["user_id"] != owner and not u.get("is_admin"):
+            await websocket.close(code=4003, reason="无权访问此会话")
+            return
     await websocket.accept()
     init_data = {
         "type": "init",
@@ -988,13 +1088,15 @@ async def ws_chat(websocket: WebSocket, session_id: str):
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "ping"})
     except WebSocketDisconnect:
-        pass
+        sessions[session_id].clear_queue()
     except Exception:
         pass
 
 
 @app.post("/api/upload")
 async def upload_file(request: Request):
+    if not get_current_user(request):
+        raise HTTPException(401, "未登录")
     from fastapi.datastructures import UploadFile as UF
     form = await request.form()
     file: UF = form.get("file")
@@ -1059,18 +1161,23 @@ document.querySelectorAll('.math-block').forEach(el => {{
         subprocess.run(
             [chrome, "--headless", "--disable-gpu", "--no-sandbox",
              f"--print-to-pdf={pdf_path}", "--print-to-pdf-no-header", html_path],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=45,
         )
     except Exception as e:
         try: Path(html_path).unlink(missing_ok=True)
         except Exception: pass
         raise HTTPException(500, f"PDF 生成失败: {e}")
+    finally:
+        try: Path(html_path).unlink(missing_ok=True)
+        except Exception: pass
     if not Path(pdf_path).exists():
         raise HTTPException(500, "PDF 生成失败")
     # Schedule cleanup of temp PDF after response
     import atexit
-    def _cleanup(p=pdf_path):
+    def _cleanup(p=pdf_path, h=html_path):
         try: Path(p).unlink(missing_ok=True)
+        except Exception: pass
+        try: Path(h).unlink(missing_ok=True)
         except Exception: pass
     atexit.register(_cleanup)
     return pdf_path
@@ -1078,7 +1185,7 @@ document.querySelectorAll('.math-block').forEach(el => {{
 
 def _md_to_html(markdown_content: str) -> str:
     import re
-    safe = markdown_content.replace("<script>", "&lt;script&gt;").replace("</script>", "&lt;/script&gt;")
+    safe = markdown_content.replace("<script", "&lt;script").replace("</script>", "&lt;/script&gt;").replace("<iframe", "&lt;iframe").replace("<img", "&lt;img").replace("<svg", "&lt;svg").replace("<input", "&lt;input").replace("<form", "&lt;form").replace("javascript:", "&amp;javascript:")
     blocks = []
     def save_block(m):
         blocks.append(m.group(1))
@@ -1102,23 +1209,26 @@ def _md_to_html(markdown_content: str) -> str:
             continue
         h_match = re.match(r'^(#{1,6})\s+(.*)', line)
         if h_match:
-            html_parts.append(f'<h{len(h_match.group(1))}>{h_match.group(2).strip()}</h{len(h_match.group(1))}>')
+            html_parts.append(f'<h{len(h_match.group(1))}>{h_match.group(2).strip().replace("<","&lt;").replace(">","&gt;")}</h{len(h_match.group(1))}>')
             continue
         if '|' in line and line.strip().startswith('|'):
             cells = [c.strip() for c in line.split('|')[1:-1]]
             if all(set(c) <= set('- :') for c in cells): continue
             if not in_table: html_parts.append('<table>'); in_table = True
             tag = 'th' if not table_rows else 'td'
-            html_parts.append(f'<tr>{"".join(f"<{tag}>{c}</{tag}>" for c in cells)}</tr>')
+            _esc = lambda x: x.replace("<", "&lt;").replace(">", "&gt;")
+            html_parts.append(f'<tr>{"".join(f"<{tag}>{_esc(c)}</{tag}>" for c in cells)}</tr>')
             table_rows.append(cells)
             continue
         elif in_table:
             html_parts.append('</table>'); in_table = False; table_rows = []
         if line.strip().startswith('---'): html_parts.append('<hr>'); continue
-        if line.startswith('> '): html_parts.append(f'<blockquote><p>{line[2:]}</p></blockquote>'); continue
-        if re.match(r'^\d+\.\s', line): html_parts.append(f'<li>{line}</li>'); continue
-        if line.startswith('- ') or line.startswith('* '): html_parts.append(f'<li>{line[2:]}</li>'); continue
-        if line.strip(): html_parts.append(f'<p>{line}</p>')
+        if line.startswith('> '):
+            html_parts.append(f'<blockquote><p>{line[2:].replace("<","&lt;").replace(">","&gt;")}</p></blockquote>'); continue
+        if re.match(r'^\d+\.\s', line): html_parts.append(f'<li>{line.replace("<","&lt;").replace(">","&gt;")}</li>'); continue
+        if line.startswith('- ') or line.startswith('* '): html_parts.append(f'<li>{line[2:].replace("<","&lt;").replace(">","&gt;")}</li>'); continue
+        if line.strip():
+            html_parts.append(f'<p>{line.replace("<","&lt;").replace(">","&gt;")}</p>')
     if in_table: html_parts.append('</table>')
     result = '\n'.join(html_parts)
     for i, tex in enumerate(blocks):

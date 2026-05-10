@@ -41,7 +41,7 @@ class ChatSession:
         self.error_message = ""
         self.created_at = datetime.now().isoformat()
         self.token_usage = {}
-        self._event_queue: asyncio.Queue = asyncio.Queue()
+        self._event_queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
         self._stop_flag = False
         self.lang = "zh"
 
@@ -50,7 +50,17 @@ class ChatSession:
         self.messages[0] = {"role": "system", "content": CHAT_SYSTEM_PROMPTS.get(lang, CHAT_SYSTEM_PROMPTS["zh"])}
 
     def _emit(self, event_type: str, data: dict):
-        self._event_queue.put_nowait(_ChatEvent(event_type, data))
+        try:
+            self._event_queue.put_nowait(_ChatEvent(event_type, data))
+        except asyncio.QueueFull:
+            try:
+                self._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                self._event_queue.put_nowait(_ChatEvent(event_type, data))
+            except asyncio.QueueFull:
+                pass
 
     def to_dict(self) -> dict:
         return {
@@ -97,11 +107,12 @@ class ChatSession:
         s.history = data.get("history", [])
         s.messages = data.get("messages", [])
         s.token_usage = data.get("token_usage", {})
-        s._event_queue = asyncio.Queue()
+        s._event_queue = asyncio.Queue(maxsize=1000)
         s._stop_flag = False
         return s
 
     async def send_message(self, user_message: str):
+        self._stop_flag = False
         self.status = "running"
         self.status_detail = f"{self.name} 思考中..."
         self.messages.append({"role": "user", "content": user_message})
@@ -126,10 +137,11 @@ class ChatSession:
                     parts.append(token)
                     self._emit("token", {"content": token})
         except Exception as e:
-            self.status = "error"
+            self.status = "idle"
             self.status_detail = f"出错: {str(e)[:50]}"
             self.error_message = str(e)
             self._emit("error", {"message": str(e)})
+            self._emit("chat_turn_end", {"round": self.round})
             self.save_to_disk()
             return
 
@@ -165,6 +177,13 @@ class ChatSession:
 
     def get_events(self) -> asyncio.Queue:
         return self._event_queue
+
+    def clear_queue(self):
+        while not self._event_queue.empty():
+            try:
+                self._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
 
     # Compatibility with DebateSession attributes used by app.py
     @property

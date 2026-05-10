@@ -2,6 +2,8 @@ import os
 import sqlite3
 import logging
 import secrets
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -55,55 +57,70 @@ def _verify_pw(password: str, hashed: str) -> bool:
 
 # --- Database ---
 
+_db_lock = threading.Lock()
+_shared_conn = None
+
+
 def get_db():
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    global _shared_conn
+    if _shared_conn is None:
+        _shared_conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+        _shared_conn.row_factory = sqlite3.Row
+        _shared_conn.execute("PRAGMA journal_mode=WAL")
+    return _shared_conn
+
+
+@contextmanager
+def _db_write():
+    _db_lock.acquire()
+    try:
+        yield
+    finally:
+        _db_lock.release()
 
 
 def init_db():
     conn = get_db()
-    conn.executescript("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            salt TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL
-        );
-        CREATE TABLE IF NOT EXISTS sessions (
-            token TEXT PRIMARY KEY,
-            user_id INTEGER NOT NULL,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS user_models (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            base_url TEXT NOT NULL,
-            api_key TEXT NOT NULL,
-            model TEXT NOT NULL,
-            auth_type TEXT DEFAULT 'bearer',
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            month TEXT NOT NULL,
-            debate_count INTEGER DEFAULT 0,
-            UNIQUE(user_id, month),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        );
-    """)
-    try:
-        conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    conn.commit()
-    conn.close()
+    with _db_write():
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                salt TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS sessions (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS user_models (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                api_key TEXT NOT NULL,
+                model TEXT NOT NULL,
+                auth_type TEXT DEFAULT 'bearer',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                month TEXT NOT NULL,
+                debate_count INTEGER DEFAULT 0,
+                UNIQUE(user_id, month),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );
+        """)
+        try:
+            conn.execute("ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass
+        conn.commit()
 
 
 # --- User ---
@@ -112,37 +129,32 @@ def create_user(username: str, password: str) -> bool:
     conn = get_db()
     try:
         hashed = _hash_pw(password)
-        conn.execute(
-            "INSERT INTO users (username, password_hash, salt, created_at) VALUES (?, ?, '', ?)",
-            (username, hashed, datetime.now().isoformat()),
-        )
-        conn.commit()
-        return True
+        with _db_write():
+            conn.execute(
+                "INSERT INTO users (username, password_hash, salt, created_at) VALUES (?, ?, '', ?)",
+                (username, hashed, datetime.now().isoformat()),
+            )
+            conn.commit()
+            return True
     except sqlite3.IntegrityError:
         return False
-    finally:
-        conn.close()
 
 
 def verify_user(username: str, password: str) -> dict | None:
     conn = get_db()
     row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
-    conn.close()
     if not row:
         return None
     d = dict(row)
-    # Migrate old SHA-256 hashes to bcrypt on successful login
     if d["salt"] and not d["password_hash"].startswith("$2"):
         import hashlib
         h = hashlib.sha256(f"{d['salt']}:{password}".encode()).hexdigest()
         if h != d["password_hash"]:
             return None
-        # Upgrade to bcrypt
-        conn = get_db()
         new_hash = _hash_pw(password)
-        conn.execute("UPDATE users SET password_hash = ?, salt = '' WHERE id = ?", (new_hash, d["id"]))
-        conn.commit()
-        conn.close()
+        with _db_write():
+            conn.execute("UPDATE users SET password_hash = ?, salt = '' WHERE id = ?", (new_hash, d["id"]))
+            conn.commit()
         log.info("Migrated user %s password to bcrypt", username)
         d["password_hash"] = new_hash
     elif not _verify_pw(password, d["password_hash"]):
@@ -153,10 +165,10 @@ def verify_user(username: str, password: str) -> dict | None:
 def create_session(user_id: int) -> str:
     token = secrets.token_hex(32)
     conn = get_db()
-    conn.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
-                 (token, user_id, datetime.now().isoformat()))
-    conn.commit()
-    conn.close()
+    with _db_write():
+        conn.execute("INSERT INTO sessions (token, user_id, created_at) VALUES (?, ?, ?)",
+                     (token, user_id, datetime.now().isoformat()))
+        conn.commit()
     return token
 
 
@@ -173,37 +185,34 @@ def verify_session(token: str) -> dict | None:
     ).fetchone()
     if row:
         d = dict(row)
-        # Check expiry
         try:
             created = datetime.fromisoformat(d["created_at"])
             if datetime.now() - created > timedelta(days=SESSION_TTL_DAYS):
-                conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
-                conn.commit()
-                conn.close()
+                with _db_write():
+                    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+                    conn.commit()
                 return None
         except Exception:
             pass
-        conn.close()
         return d
-    conn.close()
     return None
 
 
 def delete_session(token: str):
     conn = get_db()
-    conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
-    conn.commit()
-    conn.close()
+    with _db_write():
+        conn.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        conn.commit()
 
 
 def cleanup_expired_sessions():
     conn = get_db()
     cutoff = (datetime.now() - timedelta(days=SESSION_TTL_DAYS)).isoformat()
-    cur = conn.execute("DELETE FROM sessions WHERE created_at < ?", (cutoff,))
-    if cur.rowcount:
-        log.info("Cleaned up %d expired sessions", cur.rowcount)
-    conn.commit()
-    conn.close()
+    with _db_write():
+        cur = conn.execute("DELETE FROM sessions WHERE created_at < ?", (cutoff,))
+        if cur.rowcount:
+            log.info("Cleaned up %d expired sessions", cur.rowcount)
+        conn.commit()
 
 
 # --- User Models ---
@@ -214,26 +223,24 @@ def get_user_models(user_id: int) -> list[dict]:
         "SELECT id, name, base_url, model, auth_type, created_at FROM user_models WHERE user_id = ? ORDER BY created_at DESC",
         (user_id,),
     ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
 def add_user_model(user_id: int, name: str, base_url: str, api_key: str, model: str, auth_type: str = "bearer") -> int:
     conn = get_db()
-    cursor = conn.execute(
-        "INSERT INTO user_models (user_id, name, base_url, api_key, model, auth_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, name, base_url, encrypt_key(api_key), model, auth_type, datetime.now().isoformat()),
-    )
-    conn.commit()
-    mid = cursor.lastrowid
-    conn.close()
+    with _db_write():
+        cursor = conn.execute(
+            "INSERT INTO user_models (user_id, name, base_url, api_key, model, auth_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (user_id, name, base_url, encrypt_key(api_key), model, auth_type, datetime.now().isoformat()),
+        )
+        conn.commit()
+        mid = cursor.lastrowid
     return mid
 
 
 def get_user_model(user_id: int, model_id: int) -> dict | None:
     conn = get_db()
     row = conn.execute("SELECT * FROM user_models WHERE id = ? AND user_id = ?", (model_id, user_id)).fetchone()
-    conn.close()
     if not row:
         return None
     result = dict(row)
@@ -248,27 +255,25 @@ def update_user_model(model_id: int, user_id: int, **kwargs) -> bool:
     conn = get_db()
     existing = conn.execute("SELECT id FROM user_models WHERE id = ? AND user_id = ?", (model_id, user_id)).fetchone()
     if not existing:
-        conn.close()
         return False
     kwargs = {k: v for k, v in kwargs.items() if k in _ALLOWED_MODEL_FIELDS}
     if "api_key" in kwargs:
         kwargs["api_key"] = encrypt_key(kwargs["api_key"])
     if not kwargs:
-        conn.close()
         return False
     sets = ", ".join(f"{k} = ?" for k in kwargs)
     vals = list(kwargs.values()) + [model_id, user_id]
-    conn.execute(f"UPDATE user_models SET {sets} WHERE id = ? AND user_id = ?", vals)
-    conn.commit()
-    conn.close()
+    with _db_write():
+        conn.execute(f"UPDATE user_models SET {sets} WHERE id = ? AND user_id = ?", vals)
+        conn.commit()
     return True
 
 
 def delete_user_model(model_id: int, user_id: int):
     conn = get_db()
-    conn.execute("DELETE FROM user_models WHERE id = ? AND user_id = ?", (model_id, user_id))
-    conn.commit()
-    conn.close()
+    with _db_write():
+        conn.execute("DELETE FROM user_models WHERE id = ? AND user_id = ?", (model_id, user_id))
+        conn.commit()
 
 
 # --- Admin ---
@@ -276,15 +281,14 @@ def delete_user_model(model_id: int, user_id: int):
 def get_user_by_id(user_id: int) -> dict | None:
     conn = get_db()
     row = conn.execute("SELECT id, username, is_admin, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
-    conn.close()
     return dict(row) if row else None
 
 
 def set_admin(user_id: int, is_admin: bool):
     conn = get_db()
-    conn.execute("UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id))
-    conn.commit()
-    conn.close()
+    with _db_write():
+        conn.execute("UPDATE users SET is_admin = ? WHERE id = ?", (int(is_admin), user_id))
+        conn.commit()
 
 
 def get_all_users() -> list[dict]:
@@ -292,7 +296,6 @@ def get_all_users() -> list[dict]:
     rows = conn.execute(
         "SELECT id, username, is_admin, created_at FROM users ORDER BY id"
     ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
 
 
@@ -308,19 +311,18 @@ def get_quota_usage(user_id: int) -> int:
         "SELECT debate_count FROM usage WHERE user_id = ? AND month = ?",
         (user_id, _current_month())
     ).fetchone()
-    conn.close()
     return row["debate_count"] if row else 0
 
 
 def increment_quota_usage(user_id: int):
     conn = get_db()
-    conn.execute(
-        "INSERT INTO usage (user_id, month, debate_count) VALUES (?, ?, 1) "
-        "ON CONFLICT(user_id, month) SET debate_count = debate_count + 1",
-        (user_id, _current_month())
-    )
-    conn.commit()
-    conn.close()
+    with _db_write():
+        conn.execute(
+            "INSERT INTO usage (user_id, month, debate_count) VALUES (?, ?, 1) "
+            "ON CONFLICT(user_id, month) DO UPDATE SET debate_count = debate_count + 1",
+            (user_id, _current_month())
+        )
+        conn.commit()
 
 
 def get_all_usage_stats() -> list[dict]:
@@ -330,5 +332,4 @@ def get_all_usage_stats() -> list[dict]:
         "FROM usage g JOIN users u ON g.user_id = u.id "
         "ORDER BY u.username, g.month DESC"
     ).fetchall()
-    conn.close()
     return [dict(r) for r in rows]
